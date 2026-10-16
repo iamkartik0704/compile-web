@@ -1,0 +1,49 @@
+appId: com.compile.editor
+productName: comπle Editor
+artifactName: compile-${version}-${os}-${arch}.${ext}
+compression: maximum
+nativeRebuilder: legacy
+directories:
+  buildResources: build
+files:
+  - '**/*'
+  - '!**/.vscode/*'
+  - '!src/*'
+  - '!electron.vite.config.*'
+  - '!{.eslintignore,.eslintrc.cjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
+  - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+  - '!resources/*'
+  - '!dist-toolchains/*'
+  - '!temp_*'
+  - '!test_*'
+  - 'build/icon.ico'
+publish:
+  - provider: github
+win:
+  executableName: compile-editor
+  icon: build/icon.ico
+  target:
+    - nsis
+nsis:
+  include: "build/installer.nsh"
+mac:
+  target: ['zip']
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  binaries:
+    - './node_modules/node-pty/build/Release/spawn-helper'
+afterPack: scripts/fix-permissions.js
+linux:
+  target:
+    - AppImage
+    - snap
+    - deb
+  maintainer: compile-editor
+  category: Development
+protocols:
+  - name: Comiple Deep Link
+    schemes:
+      - comiple
+asarUnpack:
+  - '**/node_modules/node-pty/**'
+  - '**/node_modules/pyright/**'

@@ -1,0 +1,87 @@
+/* Dark Plus (Default VS Code) */
+body.theme-dark-plus {
+  --bg-deep: #1e1e1e;
+  --bg-activity: #333333;
+  --bg-sidebar: #252526;
+  --bg-surface: #1e1e1e;
+  --bg-elevated: #2d2d2d;
+  --bg-input: #3c3c3c;
+  --border-base: #3c3c3c;
+  --border-subtle: #3c3c3c;
+  --text-primary: #cccccc;
+  --text-secondary: #858585;
+  --text-muted: #858585;
+  --text-bright: #ffffff;
+  --accent-purple: #ebd79e;
+  --accent-blue: #ebd79e;
+  --accent-color: #ebd79e;
+  --accent-text: #111111;
+  --git-modify-color: #ebd79e;
+  --selection-bg: rgba(255, 255, 255, 0.2);
+}
+
+/* Light Modern */
+body.theme-light-modern {
+  --bg-deep: #ffffff;
+  --bg-activity: #f8f8f8; 
+  --bg-sidebar: #f3f3f3;
+  --bg-surface: #ffffff;
+  --bg-elevated: #ffffff;
+  --bg-input: #ffffff;
+  --border-base: #e5e5e5;
+  --border-subtle: #e5e5e5;
+  --text-primary: #333333;
+  --text-secondary: #767676;
+  --text-muted: #767676;
+  --text-bright: #000000;
+  --accent-purple: #007acc;
+  --accent-blue: #007acc;
+  --accent-color: #007acc;
+  --accent-text: #ffffff;
+  --git-modify-color: #b59b58; /* slightly darker beige for light theme visibility */
+  --selection-bg: rgba(0, 122, 204, 0.25);
+}
+
+/* Dracula */
+body.theme-dracula {
+  --bg-deep: #282a36;
+  --bg-activity: #191a21;
+  --bg-sidebar: #21222c;
+  --bg-surface: #282a36;
+  --bg-elevated: #44475a;
+  --bg-input: #21222c;
+  --border-base: #44475a;
+  --border-subtle: #44475a;
+  --text-primary: #f8f8f2;
+  --text-secondary: #6272a4;
+  --text-muted: #6272a4;
+  --text-bright: #ffffff;
+  --accent-purple: #bd93f9;
+  --accent-blue: #8be9fd;
+  --accent-color: #bd93f9;
+  --accent-text: #282a36;
+  --git-modify-color: #ebd79e;
+  --selection-bg: rgba(189, 147, 249, 0.3);
+}
+
+/* comple Dark */
+body.theme-compile-dark {
+  --bg-deep: #111111;
+  --bg-activity: #181818;
+  --bg-sidebar: #151515;
+  --bg-surface: #111111;
+  --bg-elevated: #222222;
+  --bg-input: #222222;
+  --border-base: #2a2a2a;
+  --border-subtle: #2a2a2a;
+  --text-primary: #e0e0e0;
+  --text-secondary: #858585;
+  --text-muted: #858585;
+  --text-bright: #ffffff;
+  --accent-purple: #ebd79e;
+  --accent-blue: #ebd79e;
+  --accent-color: #ebd79e;
+  --accent-text: #111111;
+  --git-modify-color: #ebd79e;
+  --selection-bg: rgba(255, 255, 255, 0.2);
+}

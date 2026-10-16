@@ -1,0 +1,12 @@
+services:
+  frontend:
+    build:
+      context: .
+      args:
+        - VITE_SUPABASE_URL=${VITE_SUPABASE_URL}
+        - VITE_SUPABASE_ANON_KEY=${VITE_SUPABASE_ANON_KEY}
+    image: compile-web-frontend
+    container_name: compile-frontend
+    ports:
+      - "127.0.0.1:8000:80"
+
