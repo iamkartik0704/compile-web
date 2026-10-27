@@ -1,0 +1,28 @@
+services:
+  frontend:
+    build:
+      context: ./client
+      args:
+        - VITE_SUPABASE_URL=${VITE_SUPABASE_URL}
+        - VITE_SUPABASE_ANON_KEY=${VITE_SUPABASE_ANON_KEY}
+    image: compile-web-frontend
+    container_name: compile-frontend
+    ports:
+      - "127.0.0.1:8000:80"
+    depends_on:
+      - backend
+
+  backend:
+    build:
+      context: ./server
+    image: compile-web-backend
+    container_name: compile-backend
+    ports:
+      - "127.0.0.1:3000:3000"
+    # This mounts a local folder into the container to act as the user's workspace
+    volumes:
+      - ./test-workspace:/workspace
+      - ./server/index.js:/app/index.js
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+    command: sh -c "npm install typescript typescript-language-server pyright vscode-jsonrpc && node index.js"

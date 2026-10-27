@@ -14,7 +14,7 @@ ENV VITE_SUPABASE_URL=$VITE_SUPABASE_URL
 ENV VITE_SUPABASE_ANON_KEY=$VITE_SUPABASE_ANON_KEY
 ENV NODE_OPTIONS="--max-old-space-size=4096"
 #RUN npm run build
-RUN npx vite build src/renderer
+RUN npx vite build -c vite.config.js
 #serving the web server
 FROM nginx:alpine AS runner
 COPY nginx.conf /etc/nginx/conf.d/default.conf

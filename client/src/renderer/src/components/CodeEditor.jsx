@@ -30,6 +30,7 @@ import {
 } from '../services/workspaceDiagnosticsScanner'
 import { registerToadCode } from '../monaco-toadcode'
 
+
 // --- Monaco Workers ---
 import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker'
 import jsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker'
@@ -58,6 +59,8 @@ if (!self.MonacoEnvironment) {
 }
 
 loader.config({ monaco })
+
+
 
 // ─── Global Keybinding Registry Sync ───
 let isMonacoKeybindingsSynced = false;
@@ -206,9 +209,8 @@ const syncMonacoKeybindings = (shortcuts, monacoObj) => {
   return null;
 };
 
-// ─── Lightweight LSP Client ────────────────────────────────────────
-// ─── Lightweight LSP Client (per-language) ─────────────────────────
-// Speaks JSON-RPC directly over our IPC bridge.
+// ─── Native Web LSP Client (per-language) ─────────────────────────
+// Connects directly to backend language servers over WebSockets
 class LspClient {
   constructor(language) {
     this.language = language
@@ -216,18 +218,102 @@ class LspClient {
     this.pendingRequests = new Map()
     this.onDiagnostics = null
     this.initialized = false
+    this.openedFiles = new Set()
+    this.docVersions = new Map()
+    this.queuedMessages = []
+    this.connect()
   }
 
-  // Called by the global message dispatcher
+  connect() {
+    const wsHost = typeof window !== 'undefined' && window.location.hostname ? window.location.hostname : 'localhost'
+    console.log(`[LspClient] Connecting WebSocket for: ${this.language} to ws://${wsHost}:3000/lsp?lang=${this.language}`)
+    try {
+      this.ws = new WebSocket(`ws://${wsHost}:3000/lsp?lang=${this.language}`)
+    } catch (e) {
+      console.error(`[LspClient] Failed to create WebSocket (${this.language}):`, e)
+      return
+    }
+
+    this.ws.onopen = () => {
+      console.log(`[LspClient] Connected to LSP WebSocket (${this.language}). Sending initialize...`)
+      this.sendRaw({
+        jsonrpc: '2.0',
+        id: 0,
+        method: 'initialize',
+        params: {
+          processId: null,
+          rootUri: 'file:///workspace',
+          capabilities: {
+            textDocument: {
+              completion: {
+                completionItem: { snippetSupport: true, commitCharactersSupport: true },
+                contextSupport: true
+              },
+              hover: { contentFormat: ['markdown', 'plaintext'] }
+            }
+          }
+        }
+      })
+    }
+
+    this.ws.onmessage = (event) => {
+      this.handleMessage(event.data)
+    }
+
+    this.ws.onerror = (err) => console.error(`[LspClient] WS Error (${this.language}):`, err)
+    this.ws.onclose = () => {
+      console.warn(`[LspClient] WS Closed (${this.language})`)
+      this.initialized = false
+      this.openedFiles.clear()
+      // Auto-reconnect after 3 seconds if client is still in lspClients
+      setTimeout(() => {
+        if (lspClients.get(this.language) === this) {
+          console.log(`[LspClient] Reconnecting to LSP (${this.language})...`)
+          this.connect()
+        }
+      }, 3000)
+    }
+  }
+
+  sendRaw(msg) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(msg))
+    }
+  }
+
   handleMessage(raw) {
     try {
       const msg = typeof raw === 'string' ? JSON.parse(raw) : raw
+
+      // Handle initialize response from language server
+      if (msg.id === 0 && !this.initialized) {
+        this.initialized = true
+        console.log(`[LspClient] Initialized successfully for ${this.language}! Sending 'initialized'...`)
+        this.sendRaw({ jsonrpc: '2.0', method: 'initialized', params: {} })
+
+        // Flush queued notifications (such as didOpen)
+        for (const queued of this.queuedMessages) {
+          this.sendRaw(queued)
+        }
+        this.queuedMessages = []
+        return
+      }
+
       if (msg.id !== undefined && this.pendingRequests.has(msg.id)) {
         const { resolve } = this.pendingRequests.get(msg.id)
         this.pendingRequests.delete(msg.id)
         resolve(msg.result || null)
       }
+
       if (msg.method === 'textDocument/publishDiagnostics') {
+        const { uri, diagnostics } = msg.params || {}
+        if (uri && diagnostics && window.monaco) {
+          const model = findMonacoModel(uri)
+          if (model) {
+            const markers = formatLspDiagnosticsToMonaco(diagnostics)
+            window.monaco.editor.setModelMarkers(model, `lsp-${this.language}`, markers)
+          }
+        }
         if (this.onDiagnostics) this.onDiagnostics(msg.params)
       }
     } catch (e) {
@@ -238,7 +324,7 @@ class LspClient {
   sendRequest(method, params) {
     const id = ++this.requestId
     const msg = { jsonrpc: '2.0', id, method, params }
-    window.api.sendLspMessage(this.language, JSON.stringify(msg))
+    this.sendRaw(msg)
     return new Promise((resolve) => {
       this.pendingRequests.set(id, { resolve })
       setTimeout(() => {
@@ -246,18 +332,42 @@ class LspClient {
           this.pendingRequests.delete(id)
           resolve(null)
         }
-      }, 10000)
+      }, 5000)
     })
   }
 
   sendNotification(method, params) {
     const msg = { jsonrpc: '2.0', method, params }
-    window.api.sendLspMessage(this.language, JSON.stringify(msg))
+    if (!this.initialized) {
+      this.queuedMessages.push(msg)
+    } else {
+      this.sendRaw(msg)
+    }
   }
 
-  didChange(uri, text, version) {
+  didOpen(filePath, languageId, text) {
+    const uri = pathToUri(filePath)
+    if (!uri) return
+    this.openedFiles.add(uri)
+    this.docVersions.set(uri, 1)
+    console.log(`[LspClient] Sending textDocument/didOpen for: ${uri} (${languageId})`)
+    this.sendNotification('textDocument/didOpen', {
+      textDocument: {
+        uri,
+        languageId,
+        version: 1,
+        text
+      }
+    })
+  }
+
+  didChange(filePath, text) {
+    const uri = pathToUri(filePath)
+    if (!uri) return
+    const nextVer = (this.docVersions.get(uri) || 1) + 1
+    this.docVersions.set(uri, nextVer)
     this.sendNotification('textDocument/didChange', {
-      textDocument: { uri, version },
+      textDocument: { uri, version: nextVer },
       contentChanges: [{ text }]
     })
   }
@@ -280,9 +390,12 @@ class LspClient {
   }
 
   dispose() {
-    this.sendRequest('shutdown', null).then(() => {
-      this.sendNotification('exit', null)
-    })
+    try {
+      this.sendRequest('shutdown', null).then(() => {
+        this.sendNotification('exit', null)
+        this.ws?.close()
+      })
+    } catch (e) {}
   }
 }
 
@@ -326,17 +439,17 @@ const getLanguageFromPath = (path) => {
 const lspLanguageKey = (lang) => {
   const map = {
     python: 'python',
-    c: 'c',
+    c: 'cpp',
     cpp: 'cpp',
     go: 'go',
     rust: 'rust',
     shell: 'shell',
     bash: 'bash',
-    typescript: 'typescript',
+    typescript: 'javascript',
     javascript: 'javascript',
     java: 'java',
     csharp: 'csharp',
-    cs: 'cs'
+    cs: 'csharp'
   }
   return map[lang] || null
 }
@@ -377,7 +490,35 @@ const completionKindMap = {
   24: monaco.languages.CompletionItemKind.Operator,
   25: monaco.languages.CompletionItemKind.TypeParameter,
 }
+// vscode lsp setup
+/*
+const handleEditorMount = (editor, monaco) => {
+  const lspSocket = new WebSocket('ws://localhost:3000/lsp');
 
+  lspSocket.onopen = () => {
+    listen({
+      webSocket: lspSocket,
+      onConnection: (connection) => {
+        const languageClient = new MonacoLanguageClient({
+          name: 'Language Server',
+          clientOptions: {
+            documentSelector: ['typescript', 'javascript', 'cpp'],
+            errorHandler: {
+              error: () => ({ action: ErrorAction.Continue }),
+              closed: () => ({ action: CloseAction.DoNotRestart })
+            }
+          },
+          connectionProvider: {
+            get: () => Promise.resolve(connection)
+          }
+        });
+        languageClient.start();
+      }
+    });
+  };
+};
+
+*/
 // ─── Multi-language LSP manager ────────────────────────────────────
 const lspClients = new Map()      // lspKey → LspClient
 const registeredProviders = new Set() // monacoLangId strings already registered
@@ -540,20 +681,22 @@ COMPLETION:`
 
   // Completion
   monaco.languages.registerCompletionItemProvider(monacoLangId, {
-    triggerCharacters: ['.', '(', ',', ':', ' '],
+    triggerCharacters: ['.', ':', '>', '<', '"', '/', '*', ' '],
     provideCompletionItems: async (model, position, context, token) => {
+      console.log(`[LSP Completion] Triggered for ${monacoLangId} at line ${position.lineNumber} col ${position.column}`);
       const client = findClient()
-      if (!client || !client.initialized) return { suggestions: [] }
+      if (!client || !client.initialized) {
+        console.warn(`[LSP Completion] Client not ready for ${monacoLangId}:`, client);
+        return { suggestions: [] };
+      }
       
       const uri = decodeURIComponent(model.uri.toString())
-      // LSP uses 1 = Invoked (Ctrl+Space), 2 = Trigger Character, 3 = Incomplete
       const triggerKind = context.triggerKind === monaco.languages.CompletionTriggerKind.TriggerCharacter ? 2 : 1
       
       const result = await client.completion(uri, position.lineNumber - 1, position.column - 1, {
         triggerKind,
         triggerCharacter: context.triggerCharacter
       })
-	    // prevents reading the property of null
       if (!result) return { suggestions: [] } 
       const items = Array.isArray(result) ? result : (result.items || null)
       if (!items) return { suggestions: [] }
@@ -571,12 +714,13 @@ COMPLETION:`
 
         if (item.textEdit) {
           insertText = item.textEdit.newText
-          if (item.textEdit.range) {
+          const editRange = item.textEdit.insert || item.textEdit.replace || item.textEdit.range
+          if (editRange) {
             range = {
-              startLineNumber: item.textEdit.range.start.line + 1,
-              startColumn: item.textEdit.range.start.character + 1,
-              endLineNumber: item.textEdit.range.end.line + 1,
-              endColumn: item.textEdit.range.end.character + 1
+              startLineNumber: editRange.start.line + 1,
+              startColumn: editRange.start.character + 1,
+              endLineNumber: editRange.end.line + 1,
+              endColumn: editRange.end.character + 1
             }
           }
         }
@@ -599,7 +743,7 @@ COMPLETION:`
         return mappedItem
       })
       
-      console.log(`[LSP] Returning ${suggestions.length} suggestions, incomplete:`, result.isIncomplete)
+      console.log(`[LSP] Returning ${suggestions.length} suggestions for ${monacoLangId}, incomplete:`, result.isIncomplete)
       return { suggestions, incomplete: result.isIncomplete || false }
     }
   })
@@ -666,14 +810,16 @@ const EditorTab = ({ file, isActive, isDragging, onDragStart, onDragOver, onDrop
 // ─── ONE CANONICAL URI METHOD ──────────────────────────────────────
 const getCanonicalMonacoUriString = (filePath) => {
   if (!filePath) return '';
-  if (window.monaco) {
-    // Rely exclusively on Monaco's internal normalizer (handles Windows case/slashes)
-    return window.monaco.Uri.file(filePath).toString();
-  }
-  // Best-effort fallback before monaco loads
   let formatted = filePath.replace(/\\/g, '/');
-  if (!formatted.startsWith('/')) formatted = '/' + formatted;
-  formatted = formatted.replace(/^\/([A-Z]):\//, (match, drive) => `/${drive.toLowerCase()}:/`);
+  if (formatted.startsWith('file://')) {
+    formatted = formatted.substring(7);
+  }
+  if (!formatted.startsWith('/workspace/')) {
+    formatted = '/workspace' + (formatted.startsWith('/') ? formatted : '/' + formatted);
+  }
+  if (window.monaco) {
+    return window.monaco.Uri.file(formatted).toString();
+  }
   return `file://${formatted}`;
 };
 
@@ -1267,7 +1413,6 @@ export const CodeEditor = ({
 
     if (!lspClients.has(lspKey)) {
       const client = new LspClient(lspKey)
-      client.initialized = true // backend owns initialize handshake now
       lspClients.set(lspKey, client)
 
       client.onDiagnostics = (params) => {
@@ -1287,6 +1432,8 @@ export const CodeEditor = ({
       registerProvidersForLanguage(monacoLang)
     }
 
+    const client = lspClients.get(lspKey)
+
     // Register whatever model <Editor> attached for this path so the
     // diagnostic dispatcher can resolve it.
     registerModelPath(editorRef.current?.getModel())
@@ -1300,13 +1447,12 @@ export const CodeEditor = ({
     const content = record.content
     if (typeof content !== 'string' || content === 'Loading...' || content.startsWith('Error:')) return
 
-    const alreadyOpened = lspOpenedFilesRef.current.has(activeFile)
-    window.api.send(alreadyOpened ? 'lsp:document-change' : 'lsp:document-open', {
-      filePath: activeFile,
-      text: content,
-      languageId: lspKey
-    })
-    lspOpenedFilesRef.current.set(activeFile, content.length)
+    const fileUri = pathToUri(activeFile)
+    if (!client.openedFiles.has(fileUri)) {
+      client.didOpen(activeFile, lspKey, content)
+    } else {
+      client.didChange(activeFile, content)
+    }
 
     // Instantly drain any diagnostics that arrived before the model existed.
     flushPendingMarkers(activeFile);
@@ -1726,6 +1872,7 @@ export const CodeEditor = ({
   };
 
   const handleEditorDidMountWrapper = (editor, monacoInstance) => {
+    console.log("[Frontend] Editor mounted! Active file:", activeFile);
     editorRef.current = editor
     monacoRef.current = monacoInstance
 
@@ -1744,11 +1891,41 @@ export const CodeEditor = ({
       if (activeFile) {
         restoreCachedDiagnostics(activeFile);
         flushPendingMarkers(activeFile);
+        const monacoLang = getLanguageFromPath(activeFile)
+        const lspKey = lspLanguageKey(monacoLang)
+        if (lspKey && lspClients.has(lspKey)) {
+          const client = lspClients.get(lspKey)
+          const currentText = editor.getValue()
+          const fileUri = pathToUri(activeFile)
+          if (!client.openedFiles.has(fileUri)) {
+            client.didOpen(activeFile, lspKey, currentText)
+          }
+        }
       } else if (globalActiveFile) {
         flushPendingMarkers(globalActiveFile);
       }
     });
-    
+
+    if (activeFile) {
+      const monacoLang = getLanguageFromPath(activeFile)
+      const lspKey = lspLanguageKey(monacoLang)
+      if (lspKey) {
+        if (!lspClients.has(lspKey)) {
+          const client = new LspClient(lspKey)
+          lspClients.set(lspKey, client)
+          registerProvidersForLanguage(monacoLang)
+        }
+        const client = lspClients.get(lspKey)
+        const currentText = editor.getValue()
+        if (currentText) {
+          const fileUri = pathToUri(activeFile)
+          if (!client.openedFiles.has(fileUri)) {
+            client.didOpen(activeFile, lspKey, currentText)
+          }
+        }
+      }
+    }
+
     editor.onContextMenu((e) => {
       e.event.preventDefault()
       
@@ -2311,12 +2488,9 @@ export const CodeEditor = ({
     // re-parse and republish diagnostics against the latest buffer.
     const monacoLang = getLanguageFromPath(activeFile)
     const lspKey = lspLanguageKey(monacoLang)
-    if (lspKey) {
-      window.api.send('lsp:document-change', {
-        filePath: activeFile,
-        text: value,
-        languageId: lspKey
-      })
+    if (lspKey && lspClients.has(lspKey)) {
+      const client = lspClients.get(lspKey)
+      client.didChange(activeFile, value)
     }
 
     if (autoSave && !activeFile.startsWith('untitled:')) {
@@ -2437,6 +2611,7 @@ export const CodeEditor = ({
                 onClick={() => setActiveFile(file.path)}
                 onContextMenu={(e) => handleContextMenu(e, file, idx)}
                 onClose={() => closeTab(file.path)}
+		
               />
             )
           })}
@@ -2852,7 +3027,7 @@ export const CodeEditor = ({
           ) : (
             <Editor
               height="100%"
-              path={pathToUri(activeFile)}
+              path={activeFile ? (activeFile.startsWith('/') ? `file://${activeFile}` : `file:///workspace/${activeFile}`) : undefined}
               language={getLanguageFromPath(activeFile)}
               theme={monacoTheme}
               value={currentValue}

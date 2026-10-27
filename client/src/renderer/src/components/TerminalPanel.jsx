@@ -187,6 +187,7 @@ export const TerminalPanel = forwardRef(({ height, cwd, onFixWithAi, hideHeader 
 
       // Handle resize events
       term.onResize(({ cols, rows }) => {
+	if(window.api && typeof window.api.resizeTerminal === 'function')
         window.api.resizeTerminal(id, cols, rows)
       })
 

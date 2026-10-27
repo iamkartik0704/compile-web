@@ -1,78 +1,30 @@
+const http = require('http');
 const { spawn } = require('child_process');
-const { StreamMessageReader, StreamMessageWriter } = require('vscode-jsonrpc/node');
+const pty = require('node-pty');
 const { WebSocketServer } = require('ws');
 const fs = require('fs').promises;
 const path = require('path');
+const { StreamMessageReader, StreamMessageWriter } = require('vscode-jsonrpc/node');
 
-// Spawn the real headless TypeScript Language Server
-const lspProcess = spawn('npx', ['typescript-language-server', '--stdio']);
-const reader = new StreamMessageReader(lspProcess.stdout);
-const writer = new StreamMessageWriter(lspProcess.stdin);
-
-let lspMessageId = 1;
-const pendingLspRequests = new Map();
-
-// 1. Handshake: Tell the LSP we are ready
-writer.write({
-  jsonrpc: '2.0',
-  id: lspMessageId++,
-  method: 'initialize',
-  params: {
-    processId: process.pid,
-    rootUri: 'file:///workspace',
-    capabilities: {}
-  }
-});
-
-// 2. Listen to the real LSP's output and route data back to the frontend
-reader.listen((message) => {
-  if (message.method === 'window/logMessage') return; 
-
-  // Complete the handshake
-  if (message.result && message.result.capabilities) {
-    writer.write({ jsonrpc: '2.0', method: 'initialized', params: {} });
-    console.log(' Real TypeScript Language Server Initialized!');
-    return;
-  }
-
-  // Intercept real code completions and route them back to the exact WebSocket that asked
-  if (message.id && pendingLspRequests.has(message.id)) {
-    const { ws, frontendMessageId } = pendingLspRequests.get(message.id);
-    pendingLspRequests.delete(message.id);
-
-    // Extract the REAL items from the TypeScript engine
-    const items = message.result?.items || message.result || [];
-    
-    if (ws.readyState === 1) { 
-      ws.send(JSON.stringify({ 
-        id: frontendMessageId, 
-        data: { success: true, items, isIncomplete: false } 
-      }));
-    }
-  }
-});
-
-// handling the running of the code
+// handling the running of the code (Note: window.api is an Electron frontend concept, it won't work in pure Node)
 const handleRunCode = async () => {
-  // 1. Force the active file to save to the backend disk first
-  await window.api.invoke('saveFileContents', { 
-    path: activeFilePath, 
-    content: monacoEditorValue // grab the current text from your editor state
-  });
-
-  // 2. Now execute it
-  await window.api.runFile({ filePath: activeFilePath });
+  // await window.api.invoke('saveFileContents', { ... });
+  // await window.api.runFile({ filePath: activeFilePath });
 };
 
+// Create a shared HTTP server to route multiple WebSocket endpoints
+const server = http.createServer();
+const wssApi = new WebSocketServer({ noServer: true });
+const wssLsp = new WebSocketServer({ noServer: true });
 
+const WORKSPACE_ROOT = '/workspace';
 
-
-const wss = new WebSocketServer({ port: 3000 });
-const WORKSPACE_ROOT = '/workspace'; // This matches the volume mount in docker-compose.yml
-
-wss.on('connection', function connection(ws) {
-	let shellProcess = null;
-  console.log('Client connected to IDE backend');
+// ==========================================
+// 1. MAIN API & TERMINAL WEBSOCKET (Route: /)
+// ==========================================
+wssApi.on('connection', function connection(ws) {
+  let shellProcess = null;
+  console.log('[Backend] Client connected to IDE API/Terminal');
 
   ws.on('message', async function message(rawData) {
     try {
@@ -107,157 +59,73 @@ wss.on('connection', function connection(ws) {
         await fs.writeFile(targetPath, '', 'utf-8');
         data = { success: true };
       }
-	else if (action === 'createTerminal') {
+      else if (action === 'createTerminal') {
         console.log('[Backend] Spawning interactive shell');
         
-        // Force the shell to act like a real interactive terminal
-        shellProcess = spawn('sh', ['-l', '-i'], { 
+        shellProcess = pty.spawn('bash', [], {
+          name: 'xterm-256color',
+          cols: 80,
+          rows: 24,
           cwd: '/workspace',
-          env: { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' }
+          env: process.env
         });
 
-        shellProcess.stdout.on('data', (chunk) => {
-		const text = chunk.toString().replace(/\r?\n/g, '\r\n');
-          ws.send(JSON.stringify({ type: 'terminal-data', data: text }));
+        shellProcess.onData((terminalData) => {
+          ws.send(JSON.stringify({ type: 'terminal-data', data: terminalData }));
         });
-
-        shellProcess.stderr.on('data', (chunk) => {
-	const text = chunk.toString().replace(/\r?\n/g, '\r\n');
-          ws.send(JSON.stringify({ type: 'terminal-data', data: text }));
-        });
-
-        // Push an empty command to force the prompt to render immediately
-        setTimeout(() => {
-          if (shellProcess && shellProcess.stdin) shellProcess.stdin.write('\n');
-        }, 300);
 
         ws.send(JSON.stringify({ id, data: { success: true } }));
         return;
       }
-	    // terminal data feeding,resizing
-	   
       else if (action === 'sendTerminalData') {
-        // When you type a key in the frontend, write it directly to the shell's stdin
-        if (shellProcess && shellProcess.stdin) {
-	const safePayload = payload.replace(/\r/g, '\n');
-          shellProcess.stdin.write(safePayload);
-        //  shellProcess.stdin.write(payload);
-		ws.send(JSON.stringify({ type: 'terminal-data', data: payload }));
-        }
-
-        // Return early—we don't need a success response for every single keystroke
-        return; 
+        if (shellProcess) shellProcess.write(payload);
+        return;
       }
-      
       else if (action === 'resizeTerminal') {
-        // We will just return success for now to keep Xterm.js happy
         data = { success: true };
       }
-
-	    else if (action === 'runFile') {
+      else if (action === 'runFile') {
         const targetPath = payload.filePath;
-
-        // 1. Instantly reject if the frontend forgot to send a file path
         if (!targetPath) {
           ws.send(JSON.stringify({ id, data: { success: false, error: 'No file path provided.' } }));
           return;
         }
 
         console.log(`[Backend] Executing file: ${targetPath}`);
+        let execCmd = 'node';
+        let execArgs = [targetPath];
+        if (targetPath.endsWith('.py')) {
+          execCmd = 'python3';
+          execArgs = [targetPath];
+        } else if (targetPath.endsWith('.go')) {
+          execCmd = 'go';
+          execArgs = ['run', targetPath];
+        }
 
-        // 2. Spawn a fresh Node process to execute the dynamic file
-        const child = spawn('node', [targetPath]);
+        const child = spawn(execCmd, execArgs);
 
-        // 3. Catch OS-level execution errors (e.g., file deleted, bad permissions)
         child.on('error', (err) => {
-          ws.send(JSON.stringify({
-            type: 'execution-output',
-            data: { stream: 'stderr', text: `Failed to start process: ${err.message}\n` }
-          }));
+          ws.send(JSON.stringify({ type: 'execution-output', data: { stream: 'stderr', text: `Failed to start process: ${err.message}\n` } }));
           ws.send(JSON.stringify({ id, data: { success: false, exitCode: 1 } }));
         });
 
-        // 4. Stream standard output to the frontend instantly
         child.stdout.on('data', (chunk) => {
-          ws.send(JSON.stringify({
-            type: 'execution-output',
-            data: { stream: 'stdout', text: chunk.toString() }
-          }));
+          ws.send(JSON.stringify({ type: 'execution-output', data: { stream: 'stdout', text: chunk.toString() } }));
         });
 
-        // 5. Stream runtime errors (e.g., syntax errors)
         child.stderr.on('data', (chunk) => {
-          ws.send(JSON.stringify({
-            type: 'execution-output',
-            data: { stream: 'stderr', text: chunk.toString() }
-          }));
+          ws.send(JSON.stringify({ type: 'execution-output', data: { stream: 'stderr', text: chunk.toString() } }));
         });
 
-        // 6. Notify the frontend when the execution finishes
         child.on('close', (code) => {
-          ws.send(JSON.stringify({
-            type: 'execution-output',
-            data: { stream: 'system', text: `\n[Process exited with code ${code}]\n` }
-          }));
-
+          ws.send(JSON.stringify({ type: 'execution-output', data: { stream: 'system', text: `\n[Process exited with code ${code}]\n` } }));
           ws.send(JSON.stringify({ id, data: { success: true, exitCode: code } }));
         });
 
         return;
       }
-      
-      // REAL METHOD: Tell the LSP engine exactly what you just typed so it understands the code
-// REAL METHOD: Tell the LSP engine exactly what you just typed
-      else if (action === 'lsp:document-change') {
-        // Fallback to test.js if the frontend payload is missing the file path
-        const filePath = (payload && payload.filePath) ? payload.filePath : '/workspace/test.js';
-        writer.write({
-          jsonrpc: '2.0',
-          method: 'textDocument/didChange',
-          params: {
-            textDocument: { uri: `file://${filePath}`, version: Date.now() },
-            contentChanges: [{ text: payload.text || '' }]
-          }
-        });
-        data = { success: true };
-      }
-// REAL METHOD: Ask the LSP engine for actual syntax suggestions
-      else if (action === 'sendLspMessage') {
-        // CRITICAL FIX: The frontend bundle is bugged and sending the string "javascript" 
-        // instead of the required { line, column, filePath } object. 
-        // We must return instantly to prevent Monaco from cancelling the request and crashing the UI.
-        if (typeof payload === 'string') {
-          ws.send(JSON.stringify({ 
-            id, 
-            data: { success: true, items: [], isIncomplete: false } 
-          }));
-          return;
-        }
-
-        const currentLspId = lspMessageId++;
-        pendingLspRequests.set(currentLspId, { ws, frontendMessageId: id });
-
-        const filePath = payload.filePath || '/workspace/test.js';
-        const line = payload.line !== undefined ? payload.line : 0;
-        const character = payload.column !== undefined ? payload.column : 0;
-
-        writer.write({
-          jsonrpc: '2.0',
-          id: currentLspId,
-          method: 'textDocument/completion',
-          params: {
-            textDocument: { uri: `file://${filePath}` },
-            position: { line, character },
-            context: { triggerKind: 1 } 
-          }
-        });
-        
-        return; 
-      }
-      // REAL METHOD: Ask the LSP engine for actual syntax suggestions
       else if (action === 'getAiCompletion') {
         console.log('[Backend] Real AI Completion requested');
-        
         try {
           const promptText = typeof payload === 'string' ? payload : (payload.prompt || JSON.stringify(payload));
           const apiKey = process.env.GEMINI_API_KEY;
@@ -265,29 +133,21 @@ wss.on('connection', function connection(ws) {
           const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: [{ parts: [{ text: promptText }] }]
-            })
+            body: JSON.stringify({ contents: [{ parts: [{ text: promptText }] }] })
           });
 
           const aiData = await response.json();
-          
           let completionText = aiData.candidates?.[0]?.content?.parts?.[0]?.text || '';
           completionText = completionText.replace(/^```[\w]*\n/, '').replace(/\n```$/, '').trim();
 
-          data = {
-            success: true,
-            items: [
-              { insertText: completionText }
-            ] 
-          };
+          data = { success: true, items: [{ insertText: completionText }] };
         } catch (error) {
           console.error('[Backend] AI API Error:', error.message);
           data = { success: false, items: [] };
         }
       }
 
-      // Send the resolved data back to the exact frontend promise that requested it
+      // Send the resolved data back to the frontend
       ws.send(JSON.stringify({ id, data }));
 
     } catch (error) {
@@ -296,4 +156,117 @@ wss.on('connection', function connection(ws) {
   });
 });
 
-console.log('Headless IDE backend running on ws://0.0.0.0:3000');
+// ==========================================
+// 2. LANGUAGE SERVER PROTOCOL (Route: /lsp)
+// ==========================================
+wssLsp.on('connection', (ws,request) => {
+const lang = request.lang || 'javascript';
+        console.log(`[Backend] LSP connected for language: ${lang}`);	
+	console.log('[Backend] Frontend connected to LSP WebSocket');
+	let command;
+  let args = [];
+
+  switch (lang) {
+    case 'python':
+      command = 'npx';
+      args = ['pyright-langserver', '--stdio'];
+      break;
+    case 'cpp':
+    case 'c':
+      command = 'clangd';
+      break;
+    case 'go':
+      command = 'gopls';
+      args = ['serve'];
+      break;
+    case 'java':
+      command = 'java';
+      // JDTLS requires these exact paths to boot headless in Linux
+      args = [
+      '-Declipse.application=org.eclipse.jdt.ls.core.id1',
+        '-Dosgi.bundles.defaultStartLevel=4',
+        '-Declipse.product=org.eclipse.jdt.ls.core.product',
+        '-Dlog.level=ALL',
+        '-noverify',
+        '-Xmx1G',
+        '-jar', '/opt/jdtls/plugins/org.eclipse.equinox.launcher.jar',
+        '-configuration', '/opt/jdtls/config_linux',
+        '-data', '/workspace'
+      ];
+      break;
+    case 'javascript':
+    case 'typescript':
+    default:
+      command = 'npx';
+      args = ['typescript-language-server', '--stdio'];
+      break;
+  }
+  
+  // Spawn a fresh language server process for this editor session
+  const lspProcess = spawn(command, args);
+
+  const reader = new StreamMessageReader(lspProcess.stdout);
+  const writer = new StreamMessageWriter(lspProcess.stdin);
+
+  // Pipe raw WebSocket messages from the frontend to the LSP's stdin
+  ws.on('message', (message) => {
+    try {
+      const msgStr = message.toString();
+      console.log(`[Frontend -> LSP]:`, msgStr.substring(0, 300));
+      if (msgStr.startsWith('Content-Length:')) {
+        if (lspProcess.stdin.writable) lspProcess.stdin.write(msgStr);
+      } else {
+        const json = JSON.parse(msgStr);
+        writer.write(json);
+      }
+    } catch (err) {
+      console.error('[Backend] Error writing to LSP stdin:', err.message);
+    }
+  });
+
+  // Pipe raw LSP stdout payloads directly back to the frontend WebSocket
+  reader.listen((jsonRpcMessage) => {
+    console.log(`[LSP -> Frontend]:`, JSON.stringify(jsonRpcMessage).substring(0, 300));
+    if (ws.readyState === ws.OPEN) {
+      ws.send(JSON.stringify(jsonRpcMessage));
+    }
+  });
+
+  lspProcess.stderr.on('data', (data) => {
+    console.error(`[LSP ${lang} Error]:`, data.toString());
+  });
+
+  // Kill the child process when the editor tab/socket is closed
+  ws.on('close', () => {
+    console.log('[Backend] LSP WebSocket closed, terminating process');
+    try {
+      reader.dispose();
+      writer.dispose();
+      lspProcess.kill();
+    } catch (e) {}
+  });
+});
+
+// ==========================================
+// 3. HTTP UPGRADE ROUTING
+// ==========================================
+server.on('upgrade', function upgrade(request, socket, head) {
+  const reqUrl = new URL(request.url, `http://${request.headers.host}`);
+  const pathname = reqUrl.pathname;
+
+  if (pathname === '/lsp') {
+    request.lang = reqUrl.searchParams.get('lang');
+    wssLsp.handleUpgrade(request, socket, head, function done(ws) {
+      wssLsp.emit('connection', ws, request);
+    });
+  } else {
+    // Default to the main API/Terminal socket for any other path (or root '/')
+    wssApi.handleUpgrade(request, socket, head, function done(ws) {
+      wssApi.emit('connection', ws, request);
+    });
+  }
+});
+
+server.listen(3000, '0.0.0.0', () => {
+  console.log('Headless IDE backend running on http://0.0.0.0:3000');
+});

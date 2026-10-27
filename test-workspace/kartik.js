@@ -7,3 +7,7 @@ console.log("123");
 console.log("69");
 console.log("fkjhsdfjkl");
 console.log("hey there");
+console.log("hey krish kakkar");
+console.log("krish");
+console.log("elahi kaur");
+console.log("hi pi how are you");

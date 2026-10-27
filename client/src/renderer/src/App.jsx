@@ -786,10 +786,12 @@ fetchWorkspace.then(workspace => {
 
   const saveActiveFile = async () => {
     if (!activeFile) return
-    if (typeof window.getEditorValue === 'function') {
+    const cleanPath = activeFile.replace(/\r/g , '');
+
+      if (typeof window.getEditorValue === 'function') {
       const content = window.getEditorValue()
 
-      if (activeFile.startsWith('untitled:')) {
+      if (cleanPath.startsWith('untitled:')) {
         if (window.api.showSaveDialog) {
           const newPath = await window.api.showSaveDialog({
             title: 'Save Untitled File',
@@ -809,18 +811,19 @@ fetchWorkspace.then(workspace => {
         return;
       }
 
-      await window.api.saveFileContents(activeFile, content)
-      markFileClean(activeFile)
+      await window.api.saveFileContents(cleanPath, content)
+      markFileClean(cleanPath)
     }
   }
 
   const handleRunFile = async () => {
     if (!activeFile) return
-
-    // Auto-save the file before running so the terminal executes the latest code
+    const cleanPath = activeFile.replace(/\r/g,'');
+	  // Auto-save the file before running so the terminal executes the latest code
     if (typeof window.getEditorValue === 'function') {
       const content = window.getEditorValue()
-      await window.api.saveFileContents(activeFile, content)
+	    // save using the cleanPath
+      await window.api.saveFileContents(cleanPath, content)
       markFileClean(activeFile)
     }
 
@@ -828,16 +831,18 @@ fetchWorkspace.then(workspace => {
 
     const isWindows = navigator.userAgent.toLowerCase().includes('win')
 
-    if (activeFile.endsWith('.js')) cmd = `node "${activeFile}"`
-    else if (activeFile.endsWith('.py')) cmd = `python "${activeFile}"`
-    else if (activeFile.endsWith('.cpp') || activeFile.endsWith('.c++') || activeFile.endsWith('.c')) {
+    if (cleanPath.endsWith('.js') || cleanPath.endsWith('.ts')) cmd = `node "${cleanPath}"`
+    else if (cleanPath.endsWith('.py')) cmd = `python "${cleanPath}"`
+    else if (cleanPath.endsWith('.go')) cmd = `go run "${cleanPath}"`
+    else if (cleanPath.endsWith('.java')) cmd = `java "${cleanPath}"`
+    else if (cleanPath.endsWith('.cpp') || cleanPath.endsWith('.c++') || cleanPath.endsWith('.c')) {
       cmd = isWindows
-        ? `g++ "${activeFile}" -o out.exe && out.exe`
-        : `g++ "${activeFile}" -o out && ./out`
-    } else if (activeFile.endsWith('.toad')) {
+        ? `g++ "${cleanPath}" -o out.exe && out.exe`
+        : `g++ "${cleanPath}" -o out && ./out`
+    } else if (cleanPath.endsWith('.toad')) {
       const isToadCodeEnabled = useAppStore.getState().extensions.some(e => e.id === 'ext-lang-toadcode' && e.enabled)
       if (isToadCodeEnabled) {
-        cmd = `toadcode "${activeFile}"`
+        cmd = `toadcode "${cleanPath}"`
       } else {
         console.log('ToadCode extension is not enabled')
         return
