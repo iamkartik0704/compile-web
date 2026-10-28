@@ -2221,91 +2221,31 @@ CRITICAL RULE: If the file is empty, or you are creating a new file from scratch
                       setActiveFile(id);
                     }
                   },
-                  { label: 'New File...', shortcut: 'Ctrl+Alt+Windows+N', action: () => window.dispatchEvent(new CustomEvent('create-new-file')) },
-                  { label: 'New Window', shortcutId: 'file.newWindow', shortcut: 'Ctrl+Shift+N', action: () => window.api.newWindow && window.api.newWindow() },
+                  { label: 'New File...', shortcut: 'Ctrl+Alt+N', action: () => window.dispatchEvent(new CustomEvent('create-new-file')) },
+                  { label: 'New Window', shortcutId: 'file.newWindow', shortcut: 'Ctrl+Shift+N', action: () => window.open(window.location.origin, '_blank') },
                   { type: 'separator' },
-                  {
-                    label: 'Open File...', shortcutId: 'file.open', shortcut: 'Ctrl+O', action: async () => {
-                      if (window.api.selectFile) {
-                        const p = await window.api.selectFile();
-                        if (p) {
-                          const recents = JSON.parse(localStorage.getItem('recentFiles') || '[]');
-                          if (!recents.includes(p)) localStorage.setItem('recentFiles', JSON.stringify([p, ...recents].slice(0, 5)));
-                          handleOpenFile(p, p.split(/[/\\]/).pop());
-                        }
-                      }
-                    }
-                  },
-                  {
-                    label: 'Open Folder...', shortcutId: 'file.openFolder', shortcut: 'Ctrl+K Ctrl+O', action: async () => {
-                      if (window.api.selectFolder) {
-                        const p = await window.api.selectFolder();
-                        if (p) {
-                          const recents = JSON.parse(localStorage.getItem('recentFolders') || '[]');
-                          if (!recents.includes(p)) localStorage.setItem('recentFolders', JSON.stringify([p, ...recents].slice(0, 5)));
-                          setProjectRoot(p);
-                        }
-                      }
-                    }
-                  },
-                  {
-                    label: 'Open Workspace from File...', action: async () => {
-                      if (window.api.selectFile) {
-                        const p = await window.api.selectFile();
-                        if (p) {
-                          const recents = JSON.parse(localStorage.getItem('recentFolders') || '[]');
-                          const dir = p.substring(0, Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\')));
-                          if (!recents.includes(dir)) localStorage.setItem('recentFolders', JSON.stringify([dir, ...recents].slice(0, 5)));
-                          setProjectRoot(dir);
-                        }
-                      }
-                    }
-                  },
-                  ...(JSON.parse(localStorage.getItem('recentFiles') || '[]').length > 0 ? [
-                    { type: 'separator' },
-                    ...JSON.parse(localStorage.getItem('recentFiles') || '[]').map(f => ({
-                      label: `Recent File: ${f.split(/[/\\]/).pop()}`,
-                      action: () => handleOpenFile(f, f.split(/[/\\]/).pop())
-                    }))
-                  ] : []),
-                  ...(JSON.parse(localStorage.getItem('recentFolders') || '[]').length > 0 ? [
-                    { type: 'separator' },
-                    ...JSON.parse(localStorage.getItem('recentFolders') || '[]').map(f => ({
-                      label: `Recent Folder: ${f.split(/[/\\]/).pop()}`,
-                      action: () => setProjectRoot(f)
-                    }))
-                  ] : []),
-                  { type: 'separator' },
-                  { label: `Auto Save ${autoSave ? '✓' : ''}`, action: () => setAutoSave(!autoSave) },
                   { label: 'Save', shortcutId: 'file.save', shortcut: 'Ctrl+S', action: () => saveActiveFile() },
-                  { label: 'Save As...', shortcutId: 'file.saveAs', shortcut: 'Ctrl+Shift+S', action: () => saveActiveFile() },
                   { label: 'Save All', shortcutId: 'file.saveAll', shortcut: 'Ctrl+K S', action: () => saveActiveFile() },
+                  { label: `Auto Save ${autoSave ? '✓' : ''}`, action: () => setAutoSave(!autoSave) },
                   { type: 'separator' },
-                  { label: 'Close Editor', shortcutId: 'file.close', shortcut: 'Ctrl+F4', action: () => activeFile ? closeFile(activeFile) : null },
-                  { label: 'Close Folder', shortcut: 'Ctrl+K F', action: () => setProjectRoot(null) },
-                  { label: 'Close Window', shortcutId: 'general.closeWindow', shortcut: 'Alt+F4', action: () => window.close() },
-                  { type: 'separator' },
-                  { label: 'Exit', action: () => window.close() }
+                  { label: 'Close Editor', shortcutId: 'file.close', shortcut: 'Ctrl+W', action: () => activeFile ? closeFile(activeFile) : null }
                 ]
               },
               {
                 name: 'Edit', items: [
-                  { label: 'Undo', shortcutId: 'edit.undo', shortcut: 'Ctrl+Z', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'undo' })) },
-                  { label: 'Redo', shortcutId: 'edit.redo', shortcut: 'Ctrl+Y', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'redo' })) },
+                  { label: 'Undo', shortcutId: 'edit.undo', shortcut: 'Ctrl+Z', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'edit.undo' })) },
+                  { label: 'Redo', shortcutId: 'edit.redo', shortcut: 'Ctrl+Y', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'edit.redo' })) },
                   { type: 'separator' },
-                  { label: 'Cut', shortcutId: 'edit.cut', shortcut: 'Ctrl+X', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'editor.action.clipboardCutAction' })) },
-                  { label: 'Copy', shortcutId: 'edit.copy', shortcut: 'Ctrl+C', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'editor.action.clipboardCopyAction' })) },
-                  { label: 'Paste', shortcutId: 'edit.paste', shortcut: 'Ctrl+V', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'editor.action.clipboardPasteAction' })) },
+                  { label: 'Cut', shortcutId: 'edit.cut', shortcut: 'Ctrl+X', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'edit.cut' })) },
+                  { label: 'Copy', shortcutId: 'edit.copy', shortcut: 'Ctrl+C', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'edit.copy' })) },
+                  { label: 'Paste', shortcutId: 'edit.paste', shortcut: 'Ctrl+V', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'edit.paste' })) },
                   { type: 'separator' },
                   { label: 'Find', shortcutId: 'edit.find', shortcut: 'Ctrl+F', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'actions.find' })) },
                   { label: 'Replace', shortcutId: 'edit.replace', shortcut: 'Ctrl+H', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'editor.action.startFindReplaceAction' })) },
-                  { type: 'separator' },
                   { label: 'Find in Files', shortcutId: 'edit.findInFiles', shortcut: 'Ctrl+Shift+F', action: () => setActivePanel('search') },
-                  { label: 'Replace in Files', shortcut: 'Ctrl+Shift+H', action: () => setActivePanel('search') },
                   { type: 'separator' },
                   { label: 'Toggle Line Comment', shortcutId: 'edit.commentLine', shortcut: 'Ctrl+/', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'editor.action.commentLine' })) },
-                  { label: 'Toggle Block Comment', shortcut: 'Shift+Alt+A', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'editor.action.blockComment' })) },
-                  { label: 'Emmet: Expand Abbreviation', shortcut: 'Tab', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'editor.emmet.action.expandAbbreviation' })) }
+                  { label: 'Toggle Block Comment', shortcut: 'Shift+Alt+A', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'editor.action.blockComment' })) }
                 ]
               },
               {
@@ -2318,134 +2258,53 @@ CRITICAL RULE: If the file is empty, or you are creating a new file from scratch
                   { label: 'Copy Line Down', shortcut: 'Shift+Alt+DownArrow', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'editor.action.copyLinesDownAction' })) },
                   { label: 'Move Line Up', shortcutId: 'edit.moveLineUp', shortcut: 'Alt+UpArrow', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'editor.action.moveLinesUpAction' })) },
                   { label: 'Move Line Down', shortcutId: 'edit.moveLineDown', shortcut: 'Alt+DownArrow', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'editor.action.moveLinesDownAction' })) },
-                  { label: 'Duplicate Selection', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'editor.action.duplicateSelection' })) },
                   { type: 'separator' },
-                  { label: 'Add Cursor Above', shortcut: 'Ctrl+Alt+UpArrow', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'editor.action.insertCursorAbove' })) },
-                  { label: 'Add Cursor Below', shortcut: 'Ctrl+Alt+DownArrow', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'editor.action.insertCursorBelow' })) },
-                  { label: 'Add Cursors to Line Ends', shortcut: 'Shift+Alt+I', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'editor.action.insertCursorAtEndOfEachLineSelected' })) },
                   { label: 'Add Next Occurrence', shortcutId: 'editor.action.addSelectionToNextFindMatch', shortcut: 'Ctrl+D', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'editor.action.addSelectionToNextFindMatch' })) },
-                  { label: 'Add Previous Occurrence', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'editor.action.addSelectionToPreviousFindMatch' })) },
-                  { label: 'Select All Occurrences', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'editor.action.selectHighlights' })) },
-                  { type: 'separator' },
-                  { label: 'Switch to Ctrl+Click for Multi-Cursor', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'editor.action.toggleMultiCursorModifier' })) },
-                  { label: 'Column Selection Mode', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'editor.action.toggleColumnSelection' })) }
+                  { label: 'Select All Occurrences', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'editor.action.selectHighlights' })) }
                 ]
               },
               {
                 name: 'View', items: [
                   { label: 'Command Palette...', shortcutId: 'general.commandPalette', shortcut: 'Ctrl+Shift+P', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'editor.action.quickCommand' })) },
-                  { label: 'Open View...', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'editor.action.quickCommand' })) },
                   { type: 'separator' },
-                  {
-                    label: 'Zoom', hasSubmenu: true, submenu: [
-                      { label: 'Zoom In', shortcutId: 'view.zoomIn', shortcut: 'Ctrl+=', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'editor.action.fontZoomIn' })) },
-                      { label: 'Zoom Out', shortcutId: 'view.zoomOut', shortcut: 'Ctrl+-', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'editor.action.fontZoomOut' })) },
-                      { label: 'Reset Zoom', shortcutId: 'view.zoomReset', shortcut: 'Ctrl+0', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'editor.action.fontZoomReset' })) }
-                    ]
-                  },
+                  { label: 'Explorer', shortcutId: 'nav.focusExplorer', shortcut: 'Ctrl+Shift+E', action: () => setActivePanel(activePanel === 'explorer' ? null : 'explorer') },
+                  { label: 'Search', shortcut: 'Ctrl+Shift+F', action: () => setActivePanel(activePanel === 'search' ? null : 'search') },
+                  { label: 'AI Chat', shortcut: 'Ctrl+L', action: () => setIsChatOpen(prev => !prev) },
+                  { label: 'Terminal', shortcutId: 'nav.focusTerminal', shortcut: 'Ctrl+`', action: () => setShowTerminal(prev => !prev) },
                   { type: 'separator' },
-                  {
-                    label: 'Appearance', hasSubmenu: true, submenu: [
-                      { label: 'Full Screen', shortcutId: 'general.fullscreen', shortcut: 'F11', action: () => { if (!document.fullscreenElement) { document.documentElement.requestFullscreen().catch(() => { }); } else { document.exitFullscreen(); } } },
-                      { label: 'Zen Mode', action: () => { if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(() => { }); setActivePanel(null); setShowTerminal(false); } },
-                      { type: 'separator' },
-                      { label: 'Primary Side Bar', action: () => setActivePanel(activePanel === 'explorer' ? null : 'explorer') },
-                      { label: 'Panel', action: () => setShowTerminal(!showTerminal) }
-                    ]
-                  },
-                  {
-                    label: 'Editor Layout', hasSubmenu: true, submenu: [
-                      {
-                        label: 'Split Right', action: () => {
-                          const newId = Date.now().toString();
-                          setEditorGroups(prev => {
-                            const activeGroup = prev.find(g => g.id === activeEditorGroupId) || prev[0];
-                            const newGroup = { id: newId, openFiles: activeGroup.openFiles, activeFile: activeGroup.activeFile, fileContents: activeGroup.fileContents };
-                            return [...prev, newGroup];
-                          });
-                          setActiveEditorGroupId(newId);
-                        }
-                      },
-                      { type: 'separator' },
-                      {
-                        label: 'Single', action: () => {
-                          setEditorGroups(prev => {
-                            const activeGroup = prev.find(g => g.id === activeEditorGroupId) || prev[0];
-                            return [activeGroup];
-                          });
-                        }
-                      },
-                      {
-                        label: 'Two Columns', action: () => {
-                          setEditorGroups(prev => {
-                            if (prev.length >= 2) return prev.slice(0, 2);
-                            const activeGroup = prev[0];
-                            return [activeGroup, { id: Date.now().toString(), openFiles: activeGroup.openFiles, activeFile: activeGroup.activeFile, fileContents: activeGroup.fileContents }];
-                          });
-                        }
-                      },
-                      {
-                        label: 'Three Columns', action: () => {
-                          setEditorGroups(prev => {
-                            if (prev.length >= 3) return prev.slice(0, 3);
-                            let newGroups = [...prev];
-                            while (newGroups.length < 3) {
-                              newGroups.push({ id: Date.now().toString() + Math.random(), openFiles: newGroups[0].openFiles, activeFile: newGroups[0].activeFile, fileContents: newGroups[0].fileContents });
-                            }
-                            return newGroups;
-                          });
-                        }
-                      }
-                    ]
-                  },
+                  { label: 'Word Wrap', shortcut: 'Alt+Z', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'editor.action.toggleWordWrap' })) },
+                  { label: 'Zoom In', shortcutId: 'view.zoomIn', shortcut: 'Ctrl+=', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'editor.action.fontZoomIn' })) },
+                  { label: 'Zoom Out', shortcutId: 'view.zoomOut', shortcut: 'Ctrl+-', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'editor.action.fontZoomOut' })) },
+                  { label: 'Reset Zoom', shortcutId: 'view.zoomReset', shortcut: 'Ctrl+0', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'editor.action.fontZoomReset' })) },
                   { type: 'separator' },
-                  { label: 'Explorer', shortcutId: 'nav.focusExplorer', shortcut: 'Ctrl+Shift+E', action: () => setActivePanel('explorer') },
-                  { label: 'Search', shortcut: 'Ctrl+Shift+F', action: () => setActivePanel('search') },
-                  { label: 'AI Chat', shortcut: 'Ctrl+Shift+I', action: () => setIsChatOpen(prev => !prev) },
-                  { type: 'separator' },
-                  { label: 'Terminal', shortcutId: 'nav.focusTerminal', shortcut: 'Ctrl+`', action: () => { 
-                    setShowTerminal(prev => !prev);
-                  } },
-                  { type: 'separator' },
-                  { label: 'Word Wrap', shortcut: 'Alt+Z', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'editor.action.toggleWordWrap' })) }
+                  { label: 'Full Screen', shortcutId: 'general.fullscreen', shortcut: 'F11', action: () => { if (!document.fullscreenElement) { document.documentElement.requestFullscreen().catch(() => { }); } else { document.exitFullscreen(); } } }
                 ]
               },
               {
                 name: 'Go', items: [
-                  { label: 'Back', shortcutId: 'nav.goBack', shortcut: 'Alt+LeftArrow', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'cursorUndo' })) },
-                  { label: 'Forward', shortcutId: 'nav.goForward', shortcut: 'Alt+RightArrow', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'cursorRedo' })) },
-                  { type: 'separator' },
                   { label: 'Go to File...', shortcutId: 'nav.goToFile', shortcut: 'Ctrl+P', action: () => setActivePanel('search') },
-                  { type: 'separator' },
-                  { label: 'Go to Symbol in Editor...', shortcut: 'Ctrl+Shift+O', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'editor.action.quickOutline' })) },
-                  { label: 'Go to Definition', shortcutId: 'nav.goToDef', shortcut: 'F12', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'editor.action.revealDefinition' })) },
-                  { label: 'Go to Declaration', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'editor.action.revealDeclaration' })) },
-                  { label: 'Go to Type Definition', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'editor.action.goToTypeDefinition' })) },
-                  { label: 'Go to Implementations', shortcut: 'Ctrl+F12', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'editor.action.goToImplementation' })) },
-                  { label: 'Go to References', shortcutId: 'nav.goToRef', shortcut: 'Shift+F12', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'editor.action.referenceSearch.trigger' })) },
-                  { type: 'separator' },
                   { label: 'Go to Line/Column...', shortcutId: 'nav.goToLine', shortcut: 'Ctrl+G', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'editor.action.gotoLine' })) },
-                  { label: 'Go to Bracket', shortcut: 'Ctrl+Shift+\\', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'editor.action.jumpToBracket' })) },
                   { type: 'separator' },
-                  { label: 'Next Problem', shortcut: 'F8', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'editor.action.marker.next' })) },
-                  { label: 'Previous Problem', shortcut: 'Shift+F8', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'editor.action.marker.prev' })) }
+                  { label: 'Go to Definition', shortcutId: 'nav.goToDef', shortcut: 'F12', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'editor.action.revealDefinition' })) },
+                  { label: 'Go to Type Definition', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'editor.action.goToTypeDefinition' })) },
+                  { label: 'Go to References', shortcutId: 'nav.goToRef', shortcut: 'Shift+F12', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'editor.action.referenceSearch.trigger' })) },
+                  { label: 'Go to Bracket', shortcut: 'Ctrl+Shift+\\', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'editor.action.jumpToBracket' })) }
                 ]
               },
               {
                 name: 'Run', items: [
-                  { label: 'Run Active File', shortcut: 'Ctrl+F5', action: () => runFileRef.current && runFileRef.current() },
-                  { label: 'Run Build Task...', shortcut: 'Ctrl+Shift+B', action: () => window.dispatchEvent(new CustomEvent('show-toast', { detail: { message: 'Build task started...', type: 'info' } })) }
+                  { label: 'Run Active File', shortcut: 'Ctrl+F5', action: () => runFileRef.current && runFileRef.current() }
                 ]
               },
               {
                 name: 'Terminal', items: [
                   { label: 'New Terminal', shortcutId: 'general.terminal', shortcut: 'Ctrl+Shift+`', action: () => { setShowTerminal(true); handleAddTerminal(); } },
-                  { label: 'Split Terminal', shortcutId: 'general.splitTerminal', shortcut: 'Ctrl+Shift+5', action: () => { setShowTerminal(true); handleAddTerminal(); } },
+                  { label: 'Toggle Terminal', shortcut: 'Ctrl+`', action: () => setShowTerminal(prev => !prev) },
+                  { label: 'Clear Terminal', action: () => {
+                    const term = terminalPanelRefs.current[activeTerminalId];
+                    if (term) term.executeCommand('clear\r');
+                  } },
                   { type: 'separator' },
-                  { label: 'Run Active File', action: () => runFileRef.current && runFileRef.current() },
-                  { label: 'Run Build Task...', shortcut: 'Ctrl+Shift+B', action: () => window.dispatchEvent(new CustomEvent('show-toast', { detail: { message: 'Build task started...', type: 'info' } })) },
-                  { type: 'separator' },
-                  { label: 'Reset Terminals', action: () => { setTerminals([{ id: 'default', name: 'bash' }]); setActiveTerminalId('default'); window.dispatchEvent(new CustomEvent('show-toast', { detail: { message: 'Terminals reset!', type: 'success' } })); } },
                   {
                     label: 'Sync Dependencies (npm install)', action: () => {
                       setShowTerminal(true);
@@ -2464,29 +2323,10 @@ CRITICAL RULE: If the file is empty, or you are creating a new file from scratch
               },
               {
                 name: 'Help', items: [
-                  ...(appVersion ? [{ label: `Version: ${appVersion}`, disabled: true }, { type: 'separator' }] : []),
-                  { label: 'Toggle Developer Tools', action: () => { if (window.api && window.api.toggleDevTools) window.api.toggleDevTools() } },
+                  { label: 'Settings', shortcut: 'Ctrl+,', action: () => handleOpenFile('settings:main', 'Settings') },
+                  { label: 'Keyboard Shortcuts', shortcut: 'Ctrl+K Ctrl+S', action: () => handleOpenFile('settings:shortcuts', 'Keyboard Shortcuts') },
                   { type: 'separator' },
-                  { label: 'Check for Updates...', action: async () => {
-                    window.dispatchEvent(new CustomEvent('show-toast', { detail: { message: 'Checking for updates...', type: 'info' } }))
-                    try {
-                      const res = await window.api.checkForUpdates()
-                      if (res.status === 'downloading') {
-                        window.dispatchEvent(new CustomEvent('show-toast', { detail: { message: 'Downloading update in background...', type: 'info' } }))
-                      } else if (res.status === 'downloaded') {
-                        window.dispatchEvent(new CustomEvent('show-update-modal'))
-                      } else if (res.status === 'up-to-date') {
-                        window.dispatchEvent(new CustomEvent('show-toast', { detail: { message: 'comπle is up to date.', type: 'success' } }))
-                      } else if (res.status === 'error') {
-                        window.dispatchEvent(new CustomEvent('show-toast', { detail: { message: 'Update check failed: ' + res.message, type: 'error' } }))
-                      }
-                    } catch (e) {
-                      window.dispatchEvent(new CustomEvent('show-toast', { detail: { message: 'Error checking updates.', type: 'error' } }))
-                    }
-                  } },
-                  { type: 'separator' },
-                  { label: `Version: ${appVersion}`, action: () => {} },
-                  { label: 'About comπle', action: () => window.open('https://ideweb-eta.vercel.app', '_blank') }
+                  { label: 'About comπle', action: () => window.open('https://github.com/iamkartik0704/compile-web', '_blank') }
                 ]
               }
             ].map((menu) => (

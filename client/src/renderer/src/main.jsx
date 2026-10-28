@@ -68,10 +68,30 @@ if (typeof window !== 'undefined' && !window.api) {
     // Keep configurations local for now to prevent unnecessary crashes
     getCustomConfig: () => Promise.resolve({}),
     saveCustomConfig: () => Promise.resolve(true),
-	  saveFileContents: (path, content) => wsInvoke('saveFileContents', { path, content }),
-	 createFile:(path)=>wsInvoke('createFile',path),
-	  //onLspMessage: () => {},
-	  selectFolder: () => Promise.resolve('/workspace'),
+    saveFileContents: (path, content) => wsInvoke('saveFileContents', { path, content }),
+    createFile: (path) => wsInvoke('createFile', path),
+    createFolder: (path) => wsInvoke('createFolder', path),
+    deleteItem: (itemPath) => wsInvoke('deleteItem', itemPath),
+    deleteItemPermanent: (itemPath) => wsInvoke('deleteItemPermanent', itemPath),
+    renameItem: (oldPath, newPath) => wsInvoke('renameItem', { oldPath, newPath }),
+    copyItem: (src, dest) => wsInvoke('copyItem', { src, dest }),
+    writeClipboardText: (text) => {
+      if (navigator.clipboard) return navigator.clipboard.writeText(text);
+      return Promise.resolve();
+    },
+    readClipboardText: async () => {
+      if (navigator.clipboard) {
+        try {
+          const text = await navigator.clipboard.readText();
+          return { success: true, text };
+        } catch (e) {
+          return { success: false, text: '' };
+        }
+      }
+      return { success: false, text: '' };
+    },
+    pasteFromOsClipboard: () => Promise.resolve({ success: false }),
+    selectFolder: () => Promise.resolve('/workspace'),
 	  send:(channel,data)=>{console.log(`[mock send] ${channel}`,data)},
 
 

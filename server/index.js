@@ -161,6 +161,26 @@ wssApi.on('connection', function connection(ws) {
         await fs.writeFile(targetPath, '', 'utf-8');
         data = { success: true };
       }
+      else if (action === 'createFolder') {
+        const targetPath = payload;
+        await fs.mkdir(targetPath, { recursive: true });
+        data = { success: true };
+      }
+      else if (action === 'deleteItem' || action === 'deleteItemPermanent') {
+        const targetPath = typeof payload === 'string' ? payload : (payload.path || payload.targetPath);
+        await fs.rm(targetPath, { recursive: true, force: true });
+        data = { success: true };
+      }
+      else if (action === 'renameItem') {
+        const { oldPath, newPath } = payload;
+        await fs.rename(oldPath, newPath);
+        data = { success: true };
+      }
+      else if (action === 'copyItem') {
+        const { src, dest } = payload;
+        await fs.cp(src, dest, { recursive: true });
+        data = { success: true };
+      }
       else if (action === 'createTerminal') {
         console.log('[Backend] Spawning interactive shell');
         
@@ -243,6 +263,12 @@ wssApi.on('connection', function connection(ws) {
 
     } catch (error) {
       console.error('Error processing action:', error.message);
+      try {
+        const parsed = JSON.parse(rawData);
+        if (parsed.id) {
+          ws.send(JSON.stringify({ id: parsed.id, data: { success: false, error: error.message } }));
+        }
+      } catch (_) {}
     }
   });
 });

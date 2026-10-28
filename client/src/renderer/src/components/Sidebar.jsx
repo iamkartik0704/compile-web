@@ -530,15 +530,14 @@ export const Sidebar = ({
 
   const handleCopyPath = async (item) => {
     try {
-      if (window.api.writeClipboardText) {
+      if (window.api && window.api.writeClipboardText) {
         await window.api.writeClipboardText(item.path)
       } else {
         await navigator.clipboard.writeText(item.path)
       }
-      setDialog({ type: 'alert', title: 'Path Copied', message: `Copied path to clipboard:\n${item.path}`, onConfirm: () => setDialog(null) })
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: { message: `Copied path to clipboard`, type: 'info' } }))
     } catch (err) {
       console.error(err)
-      setDialog({ type: 'alert', title: 'Copy Failed', message: err.message, onConfirm: () => setDialog(null) })
     }
     setContextMenu(null)
   }
@@ -546,15 +545,14 @@ export const Sidebar = ({
   const handleCopyRelativePath = async (item) => {
     const rel = item.path.replace(projectRoot, '').replace(/^[/\\]/, '')
     try {
-      if (window.api.writeClipboardText) {
+      if (window.api && window.api.writeClipboardText) {
         await window.api.writeClipboardText(rel)
       } else {
         await navigator.clipboard.writeText(rel)
       }
-      setDialog({ type: 'alert', title: 'Relative Path Copied', message: `Copied relative path to clipboard:\n${rel}`, onConfirm: () => setDialog(null) })
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: { message: `Copied relative path: ${rel}`, type: 'info' } }))
     } catch (err) {
       console.error(err)
-      setDialog({ type: 'alert', title: 'Copy Failed', message: err.message, onConfirm: () => setDialog(null) })
     }
     setContextMenu(null)
   }
@@ -568,13 +566,14 @@ export const Sidebar = ({
     const oldPath = item.path
     const newPath = `${getParentPath(oldPath)}/${newName}`
     const res = await window.api.renameItem(oldPath, newPath, projectRoot)
-    if (res.success) {
+    if (res?.success) {
       setRenamingItem(null)
       handleRefresh()
       window.dispatchEvent(new CustomEvent('file-renamed', { detail: { oldPath, newPath, newName } }))
+      window.dispatchEvent(new CustomEvent('show-toast', { detail: { message: `Renamed to '${newName}'`, type: 'success' } }))
     } else {
-      console.error(res.error)
-      setDialog({ type: 'alert', title: 'Rename Failed', message: res.error, onConfirm: () => setDialog(null) })
+      console.error(res?.error)
+      setDialog({ type: 'alert', title: 'Rename Failed', message: res?.error || 'Failed to rename item', onConfirm: () => setDialog(null) })
     }
   }
 
@@ -589,11 +588,12 @@ export const Sidebar = ({
       onConfirm: async () => {
         setDialog(null)
         const res = await window.api.deleteItem(item.path, projectRoot)
-        if (res.success) {
+        if (res?.success) {
           handleRefresh()
           window.dispatchEvent(new CustomEvent('file-deleted', { detail: { path: item.path } }))
+          window.dispatchEvent(new CustomEvent('show-toast', { detail: { message: `Deleted '${item.name}'`, type: 'success' } }))
         } else {
-          setDialog({ type: 'alert', title: 'Delete Failed', message: res.error, onConfirm: () => setDialog(null) })
+          setDialog({ type: 'alert', title: 'Delete Failed', message: res?.error || 'Failed to delete item', onConfirm: () => setDialog(null) })
         }
       },
       onCancel: () => setDialog(null)
@@ -608,13 +608,13 @@ export const Sidebar = ({
       message: `Are you sure you want to permanently delete '${item.name}'? This cannot be undone.`,
       onConfirm: async () => {
         setDialog(null)
-        const res = await window.api.deleteItemPermanent(item.path, projectRoot)
-        if (res.success) {
+        const res = window.api.deleteItemPermanent ? await window.api.deleteItemPermanent(item.path, projectRoot) : await window.api.deleteItem(item.path, projectRoot)
+        if (res?.success) {
           handleRefresh()
           window.dispatchEvent(new CustomEvent('file-deleted', { detail: { path: item.path } }))
+          window.dispatchEvent(new CustomEvent('show-toast', { detail: { message: `Permanently deleted '${item.name}'`, type: 'success' } }))
         } else {
-          console.error(res.error)
-          setDialog({ type: 'alert', title: 'Delete Failed', message: res.error, onConfirm: () => setDialog(null) })
+          setDialog({ type: 'alert', title: 'Delete Failed', message: res?.error || 'Failed to permanently delete item', onConfirm: () => setDialog(null) })
         }
       },
       onCancel: () => setDialog(null)
@@ -856,8 +856,21 @@ export const Sidebar = ({
           style={{ left: contextMenu.x, top: contextMenu.y, position: 'fixed', zIndex: 1000 }}
           onClick={(e) => e.stopPropagation()}
         >
-          <div className="editor-context-menu-item" onClick={() => handleRevealInExplorer(contextMenu.targetItem)}>Reveal in File Explorer</div>
-          <div className="editor-context-menu-separator"></div>
+          {contextMenu.targetItem && (contextMenu.targetItem.isDirectory || contextMenu.targetItem.path === projectRoot) && (
+            <>
+              <div className="editor-context-menu-item" onClick={() => {
+                const targetDir = contextMenu.targetItem.path;
+                setCreatingItem({ type: 'file', targetDir });
+                setContextMenu(null);
+              }}>New File</div>
+              <div className="editor-context-menu-item" onClick={() => {
+                const targetDir = contextMenu.targetItem.path;
+                setCreatingItem({ type: 'folder', targetDir });
+                setContextMenu(null);
+              }}>New Folder</div>
+              <div className="editor-context-menu-separator"></div>
+            </>
+          )}
           <div className="editor-context-menu-item" onClick={() => handleCut(contextMenu.targetItem)}>Cut</div>
           <div className="editor-context-menu-item" onClick={() => handleCopy(contextMenu.targetItem)}>Copy</div>
           <div className="editor-context-menu-item" onClick={() => handlePaste(contextMenu.targetItem)}>Paste</div>

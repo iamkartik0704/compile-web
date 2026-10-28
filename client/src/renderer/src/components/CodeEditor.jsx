@@ -1532,6 +1532,20 @@ export const CodeEditor = ({
       // or keystrokes to fail. We MUST refocus the editor first!
       editorRef.current.focus()
 
+      if (actionId === 'edit.undo' || actionId === 'undo') {
+        editorRef.current.trigger('keyboard', 'undo', null)
+        const model = editorRef.current.getModel()
+        if (model && model.undo) model.undo()
+        return
+      }
+
+      if (actionId === 'edit.redo' || actionId === 'redo') {
+        editorRef.current.trigger('keyboard', 'redo', null)
+        const model = editorRef.current.getModel()
+        if (model && model.redo) model.redo()
+        return
+      }
+
       // Manually handle clipboard actions because native ones fail in Electron without an explicit edit menu
       if (actionId === 'edit.paste') {
         try {
