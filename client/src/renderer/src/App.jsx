@@ -10,24 +10,15 @@ import ReactMarkdown from 'react-markdown'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import { applyDiff, unescapeXml } from './diffUtils'
-import { Plus, Play, Bug, Maximize2, Minimize2, Trash2, CheckCircle, Circle, RefreshCw, Command, ChevronRight, ChevronDown, ChevronUp, File, Code, Cpu, Activity, Info, LogOut, ArrowRight, X, Search, Settings, User, LayoutGrid, PanelLeft, PanelBottom, PanelRight, Square, Minus, Terminal, Key, ShieldCheck, Sparkles, Folder, GitBranch, Download, Share2 } from 'lucide-react'
-import { getEnclosingScope } from './utils/astParser'
+import { Plus, Play, Bug, Maximize2, Minimize2, Trash2, CheckCircle, Circle, RefreshCw, Command, ChevronRight, ChevronDown, ChevronUp, File, Code, Cpu, Activity, Info, ArrowRight, X, Search, Settings, LayoutGrid, PanelLeft, PanelBottom, PanelRight, Square, Minus, Terminal, Key, ShieldCheck, Sparkles, Folder, GitBranch, Download, Share2 } from 'lucide-react'
 import { CodebaseVisualizer } from './components/CodebaseVisualizer'
 import { DSAExplainer } from './components/DSAExplainer'
 import { GitTimeline } from './components/GitTimeline'
 import { ActivityBar } from './components/ActivityBar'
 
-import { SourceControlPanel } from './components/SourceControlPanel'
-import { ExtensionsPanel } from './components/ExtensionsPanel'
-import { DockerPanel } from './components/DockerPanel'
-import { KubernetesPanel } from './components/KubernetesPanel'
-import { ProjectManagerPanel } from './components/ProjectManagerPanel'
-import DebugPanel from './components/DebugPanel'
+import { AiChatSidebar } from './components/AiChatSidebar'
 import { useAppStore } from './store/appStore'
-import { AuthPanel } from './components/AuthPanel'
-import { supabase } from './lib/supabase'
 import * as monaco from 'monaco-editor'
-import { useAuthStore } from './store/authStore'
 import './assets/sidebar.css'
 import './assets/editor.css'
 import './assets/themes.css'
@@ -255,7 +246,6 @@ MODEL_GROUPS.forEach((g) => g.models.forEach((m) => (MODEL_MAP[m.id] = m)))
 // ── Command Registry ──
 const COMMAND_REGISTRY = [
   { id: 'explain', trigger: 'explain', label: 'Explain Code', desc: 'Explain selection or active file' },
-  { id: 'fix', trigger: 'fix', label: 'Fix Diagnostics', desc: 'Attempt to fix current errors' },
   { id: 'clear', trigger: 'clear', label: 'Clear Chat', desc: 'Clear the current conversation' },
   { id: 'model', trigger: 'model', label: 'Switch Model', desc: 'Quick select a different model' }
 ]
@@ -402,46 +392,12 @@ function App() {
   }
 
   const handleConfirmShare = async () => {
-    const markdown = formatChatAsMarkdown(activeSession)
-    if (!markdown) return
-    if (markdown.length > 500000) {
-      setShareModal(prev => ({ ...prev, error: "Chat is too large to share (max 500KB)." }))
-      return
-    }
-
-    setShareLoading(true)
-    setShareModal(prev => ({ ...prev, error: null }))
-    const { data, error } = await supabase.rpc('share_chat_limited', { chat_content: markdown })
-    setShareLoading(false)
-
-    if (error) {
-      setShareModal(prev => ({ ...prev, error: "Failed to share chat: " + error.message }))
-      return
-    }
-
-    if (data && data.id && data.delete_token) {
-      localStorage.setItem(`share_info_${activeChatId}`, JSON.stringify(data))
-      setShareModal({ isOpen: true, mode: 'shared-success', data, error: null })
-    }
+    setShareModal(prev => ({ ...prev, error: "Cloud sharing is disabled in local mode." }))
   }
 
   const handleConfirmRevoke = async () => {
-    const { data } = shareModal
-    if (!data || !data.id || !data.delete_token) return
-
-    setShareLoading(true)
-    setShareModal(prev => ({ ...prev, error: null }))
-    const { error, data: returnedData } = await supabase.rpc('revoke_shared_chat', { chat_id: data.id, token: data.delete_token })
-    setShareLoading(false)
-
-    if (error) {
-      setShareModal(prev => ({ ...prev, error: "Failed to revoke: " + error.message }))
-      return
-    }
-
     localStorage.removeItem(`share_info_${activeChatId}`)
     setShareModal({ isOpen: false, mode: '', data: null, error: null })
-    window.dispatchEvent(new CustomEvent('show-toast', { detail: { message: 'Share link revoked successfully.', type: 'success' } }))
   }
 
   const closeShareModal = () => setShareModal({ isOpen: false, mode: '', data: null, error: null })
@@ -559,7 +515,6 @@ fetchWorkspace.then(workspace => {
 
   // ── UI State ──
   const [showExplorer, setShowExplorer] = useState(true)
-  const [rightPanel, setRightPanel] = useState(null)
   const [showVisualizer, setShowVisualizer] = useState(false)
   const [dsaExplainer, setDsaExplainer] = useState(null) // null | { code, language }
   const [toast, setToast] = useState(null)
@@ -586,6 +541,23 @@ fetchWorkspace.then(workspace => {
     }
     window.addEventListener('show-toast', handleShowToast)
     return () => window.removeEventListener('show-toast', handleShowToast)
+  }, [])
+
+  // Create and open new file from AI Chat snippet
+  useEffect(() => {
+    const handleAiNewFile = (e) => {
+      const { content = '', language = 'txt' } = e.detail || {}
+      const extMap = { cpp: 'cpp', c: 'c', js: 'js', javascript: 'js', ts: 'ts', typescript: 'ts', py: 'py', python: 'py', html: 'html', css: 'css', json: 'json', md: 'md', sql: 'sql' }
+      const ext = extMap[(language || '').toLowerCase()] || 'txt'
+      const id = `untitled:Untitled-${Date.now()}.${ext}`
+      const name = `Untitled.${ext}`
+      setOpenFiles(prev => [...prev, { name, path: id, content }])
+      setActiveFile(id)
+      setToast({ message: `Opened code in ${name}`, type: 'success' })
+      setTimeout(() => setToast(null), 3000)
+    }
+    window.addEventListener('ai-create-new-file', handleAiNewFile)
+    return () => window.removeEventListener('ai-create-new-file', handleAiNewFile)
   }, [])
 
   // Open DSA Explainer prepopulated from the editor context menu.
@@ -747,7 +719,6 @@ fetchWorkspace.then(workspace => {
       return [...prev, { id: newId, name: `bash ${maxNum + 1}` }]
     })
     setActiveTerminalId(newId)
-    setBottomTab('terminal')
   }
 
   const handleKillTerminal = (id, e) => {
@@ -765,11 +736,7 @@ fetchWorkspace.then(workspace => {
   }
 
   // ── Layout State ──
-  const [bottomTab, setBottomTab] = useState('terminal') // 'terminal' | 'ai-debugger' | 'debugger-history'
-  const [aiDebugger, setAiDebugger] = useState({ explanation: '', codeFix: '', loading: false })
-  const [debuggerHistory, setDebuggerHistory] = useState([])
   const streamRef = useRef('')
-  const aiDebuggerStreamRef = useRef('')
 
   const [autoCompleteEnabled, setAutoCompleteEnabled] = useState(localStorage.getItem('editor-inlineSuggest') !== 'false')
   const [autoCompleteDelay, setAutoCompleteDelay] = useState(500)
@@ -1012,216 +979,11 @@ fetchWorkspace.then(workspace => {
     }
   }, [])
 
-  const handleFixWithAi = async () => {
-    const activeTerminal = terminalPanelRefs.current[activeTerminalId]
-    if (!activeTerminal || !activeFile) return
-    const bufferText = activeTerminal.getBuffer()
 
-    // Switch to AI Debugger Tab
-    setBottomTab('ai-debugger')
-    setAiDebugger({ explanation: '', codeFix: '', loading: true })
-
-    let activeFileContent = ''
-    let scopedContext = ''
-    try {
-      if (typeof window.getEditorValue === 'function') {
-        activeFileContent = window.getEditorValue()
-
-        // AST Optimization
-        if (typeof window.getCursorPosition === 'function') {
-          const pos = window.getCursorPosition()
-          if (pos) {
-            const ext = activeFile.split('.').pop()
-            let lang = 'javascript'
-            if (ext === 'js' || ext === 'jsx') lang = 'javascript'
-            if (ext === 'ts' || ext === 'tsx') lang = 'typescript'
-            if (ext === 'py') lang = 'python'
-            if (ext === 'cpp' || ext === 'hpp') lang = 'cpp'
-            if (ext === 'c' || ext === 'h') lang = 'c'
-            if (ext === 'java') lang = 'java'
-            if (ext === 'go') lang = 'go'
-            if (ext === 'rs') lang = 'rust'
-
-            const scope = await getEnclosingScope(activeFileContent, pos.lineNumber, lang)
-            if (scope) {
-              scopedContext = `\n\n[AST Optimized] Enclosing Scope (${scope.type} lines ${scope.startLine}-${scope.endLine}):\n${scope.text}`
-              activeFileContent = activeFileContent.substring(0, 500) + '\n... (truncated by AST) ...'
-            }
-          }
-        }
-      } else {
-        const fileRes = await window.api.getFileContents(activeFile)
-        activeFileContent = fileRes.content || fileRes || ''
-      }
-    } catch (e) {
-      console.error('Could not read active file contents for AI', e)
-    }
-
-    // Load full project tree
-    let allProjectFiles = []
-    let projectTreeText = ''
-    try {
-      if (projectRoot) {
-        allProjectFiles = await window.api.getProjectTree(projectRoot) || []
-        if (allProjectFiles.length > 0) {
-          const relativePaths = allProjectFiles.map(p => p.replace(projectRoot, '').replace(/^[\\/]/, ''))
-          projectTreeText = `\n\nProject Tree:\n${relativePaths.slice(0, 500).join('\n')}`
-        }
-      }
-    } catch (e) { console.error('Failed to get project tree', e) }
-
-    // Scan for multiple files in terminal output
-    const pathRegex = /(?:[a-zA-Z]:\\|\/)[^\s"':<>]+(?:\.[a-zA-Z0-9]+)+/g
-    let matches = [...new Set(bufferText.match(pathRegex) || [])]
-
-    // Resolve relative paths from terminal by matching basenames
-    if (allProjectFiles.length > 0) {
-      const possibleRelFiles = allProjectFiles.filter(p => {
-        const basename = p.split(/[\\/]/).pop()
-        return bufferText.includes(basename)
-      })
-      matches = [...new Set([...matches, ...possibleRelFiles])]
-    }
-
-    const normalizePath = p => (p || '').replace(/\\/g, '/').toLowerCase()
-    const activeNorm = normalizePath(activeFile)
-
-    let multiFileContext = ''
-    for (const match of matches) {
-      if (normalizePath(match) !== activeNorm) {
-        try {
-          const res = await window.api.getFileContents(match)
-          if (res && (res.content || res)) {
-            multiFileContext += `\n\nRelated File in Stack Trace (${match}):\n${(res.content || res).substring(0, 3000)}`
-          }
-        } catch (e) { }
-      }
-    }
-
-    const promptText = `The user encountered a terminal error.
-Terminal Output:
-${bufferText.substring(Math.max(0, bufferText.length - 2000))}
-
-Active File (${activeFile}):
-${activeFileContent.substring(0, 3000)}${scopedContext}${multiFileContext}${projectTreeText}
-
-Analyze the error and provide a fix for the file that caused it. Return your response in exactly this format:
-EXPLANATION: <brief explanation of the error in 1-2 short sentences>
-FIX:
-<edit_file path="FULL_PATH_OF_FILE_TO_FIX">
-<search_replace>
-<search>
-the exact code to be replaced
-</search>
-<replace>
-the new code
-</replace>
-</search_replace>
-</edit_file>`
-
-    try {
-      aiDebuggerStreamRef.current = ''
-      await window.api.streamAiDebugger(promptText, { model: selectedModel, customConfig: { baseURL: customBaseUrl, modelId: customModelId } })
-      // Streaming will populate state via useEffect
-    } catch (e) {
-      setAiDebugger({ explanation: `Error during AI analysis: ${e.message}`, codeFix: '', loading: false })
-    }
-  }
-
-  const handleDebuggerFollowUp = async (e) => {
-    if (e.key === 'Enter' && !e.shiftKey && e.target.value.trim()) {
-      e.preventDefault()
-      const question = e.target.value.trim()
-      e.target.value = ''
-
-      const promptText = `Previous AI Explanation:\n${aiDebugger.explanation}\n\nPrevious AI Code Fix:\n${aiDebugger.codeFix}\n\nUser Follow-up Question:\n${question}\n\nAnalyze the user's follow-up question and provide an updated explanation and fix. Return your response in exactly this format:\nEXPLANATION: <brief explanation of the error in 1-2 short sentences>\nFIX:\n<edit_file path="FULL_PATH_OF_FILE_TO_FIX">\n<search_replace>\n<search>\nthe exact code to be replaced\n</search>\n<replace>\nthe new code\n</replace>\n</search_replace>\n</edit_file>`
-
-      setAiDebugger(prev => ({ ...prev, loading: true }))
-      try {
-        aiDebuggerStreamRef.current = ''
-        await window.api.streamAiDebugger(promptText, { model: selectedModel, customConfig: { baseURL: customBaseUrl, modelId: customModelId } })
-      } catch (err) {
-        setAiDebugger({ explanation: `Error: ${err.message}`, codeFix: '', loading: false })
-      }
-    }
-  }
-
-  const applyAiDebuggerFix = async (forceRun = false) => {
-    if (!activeFile || !aiDebugger.codeFix) return
-
-    // Extract target path from the <edit_file> tag if present
-    const regex = /<edit_file\s+path="([^"]+)">([\s\S]*?)<\/edit_file>/i
-    const match = regex.exec(aiDebugger.codeFix)
-    const targetPath = match ? match[1] : activeFile
-    const body = match ? match[2] : aiDebugger.codeFix
-    const normalize = (p) => (p || '').replace(/\\/g, '/').toLowerCase()
-
-    if (forceRun) {
-      // Add to Debugger History
-      const activeTerminal = terminalPanelRefs.current[activeTerminalId]
-      const bufferText = activeTerminal?.getBuffer() || ''
-      setDebuggerHistory(prev => [{
-        timestamp: new Date().toLocaleTimeString(),
-        error: bufferText.substring(Math.max(0, bufferText.length - 800)),
-        explanation: aiDebugger.explanation,
-        codeFix: aiDebugger.codeFix
-      }, ...prev])
-
-      if (normalize(targetPath) === normalize(activeFile)) {
-        window.dispatchEvent(new CustomEvent('force-apply-diff', {
-          detail: { body: aiDebugger.codeFix, path: targetPath, autoRun: true }
-        }))
-      } else {
-        try {
-          let oldContent = ''
-          try {
-            const fileContext = await window.api.getFileContents(targetPath)
-            oldContent = fileContext.content || fileContext || ''
-          } catch (e) { }
-
-          const { newText, hasChanges } = applyDiff(oldContent, body)
-          if (hasChanges) {
-            await window.api.saveFileContents(targetPath, newText)
-            handleOpenFile(targetPath, targetPath.split(/[\\/]/).pop())
-            window.dispatchEvent(new Event('refresh-sidebar'))
-            window.dispatchEvent(new Event('global-run-file'))
-          }
-        } catch (err) {
-          console.error("Failed to apply to background file", err)
-        }
-      }
-      setBottomTab('terminal')
-    } else {
-      if (normalize(targetPath) === normalize(activeFile)) {
-        window.dispatchEvent(new CustomEvent('auto-apply-diff', {
-          detail: { body: aiDebugger.codeFix, path: targetPath }
-        }))
-      } else {
-        try {
-          let oldContent = ''
-          try {
-            const fileContext = await window.api.getFileContents(targetPath)
-            oldContent = fileContext.content || fileContext || ''
-          } catch (e) { }
-
-          const { newText, hasChanges } = applyDiff(oldContent, body)
-          if (hasChanges) {
-            await window.api.saveFileContents(targetPath, newText)
-            handleOpenFile(targetPath, targetPath.split(/[\\/]/).pop())
-            window.dispatchEvent(new Event('refresh-sidebar'))
-          }
-        } catch (err) {
-          console.error("Failed to auto-apply to background file", err)
-        }
-      }
-      setBottomTab('terminal')
-    }
-  }
 
   const [sidebarWidth, setSidebarWidth] = useState(260)
-  const { activePanel, setActivePanel, activeTheme, extensions, autoSave, setAutoSave } = useAppStore()
+  const { activePanel, setActivePanel, activeTheme, extensions, autoSave, setAutoSave, isChatOpen, setIsChatOpen, toggleChat, chatWidth, setChatWidth } = useAppStore()
   const isLiveServerEnabled = extensions?.find(e => e.id === 'ext-prod-liveserver')?.enabled
-  const [rightPanelWidth, setRightPanelWidth] = useState(320)
 
   // Initialize active theme
   useEffect(() => {
@@ -1318,24 +1080,7 @@ fetchKeys.then((result) => {
     });
     }
 
-    if (window.api && window.api.onAiDebuggerStream) {
-	    window.api.onAiDebuggerStream((chunk) => {
-      if (chunk === undefined) return
-      aiDebuggerStreamRef.current += chunk
 
-      const fullText = aiDebuggerStreamRef.current
-      const parts = fullText.split('FIX:')
-      let explanation = parts[0].replace('EXPLANATION:', '').trim()
-
-      // Format <think> tags dynamically so they render in Markdown
-      explanation = explanation.replace(/<think>([\s\S]*?)(?:<\/think>|$)/gi, '> *Thinking...*\n> $1\n\n')
-
-      let codeFix = parts[1] ? parts[1].trim() : ''
-      codeFix = codeFix.replace(/^```[a-zA-Z0-9+#-]*\n/, '').replace(/```$/, '').trim()
-
-      setAiDebugger({ explanation, codeFix, loading: false })
-    })
-    }
   }, [])
 
   // ── Subscribe to model resolution ──
@@ -1357,13 +1102,6 @@ fetchKeys.then((result) => {
     })
     }
   }, [])
-
-  // ── Auto-scroll chat ──
-  useLayoutEffect(() => {
-    if (rightPanel === 'chat') {
-      chatEndRef.current?.scrollIntoView({ behavior: 'auto' })
-    }
-  }, [messages, rightPanel, activeChatId])
 
   const pendingChordRef = useRef([])
   const [currentChordDisplay, setCurrentChordDisplay] = useState('')
@@ -1464,9 +1202,6 @@ fetchKeys.then((result) => {
       case 'general.settings':
         handleOpenFile('settings:main', 'Settings')
         return true
-      case 'general.extensions':
-        setActivePanel('extensions')
-        return true
 
       // Mapped unimplemented global features
       case 'general.split': {
@@ -1525,18 +1260,13 @@ fetchKeys.then((result) => {
         setActivePanel('explorer')
         return true
       case 'nav.focusTerminal':
-        if (showTerminal && bottomTab === 'terminal') {
-          setShowTerminal(false)
-        } else {
-          setShowTerminal(true)
-          setBottomTab('terminal')
-        }
+        setShowTerminal(prev => !prev)
         return true
       case 'edit.findInFiles':
         setActivePanel('search')
         return true
       case 'ai.chat':
-        setRightPanel('chat')
+        setIsChatOpen(prev => !prev)
         return true
 
       case 'debug.start':
@@ -1545,8 +1275,7 @@ fetchKeys.then((result) => {
       case 'debug.stepInto':
       case 'debug.stepOut':
       case 'debug.stop':
-        setActivePanel('debug')
-        window.dispatchEvent(new CustomEvent('show-toast', { detail: { message: `Debug panel opened. Note: Full debugging requires a language-specific DAP backend.`, type: 'info' } }))
+        window.dispatchEvent(new CustomEvent('show-toast', { detail: { message: `Debugging requires a language-specific DAP backend.`, type: 'info' } }))
         return true
 
       case 'nav.goBack':
@@ -2275,98 +2004,7 @@ CRITICAL RULE: If the file is empty, or you are creating a new file from scratch
     return () => window.removeEventListener('reload-ai-config', handleReload)
   }, [])
 
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      useAuthStore.getState().setSession(session)
-    })
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      useAuthStore.getState().setSession(session)
-    })
-
-    const removeListener = window.api?.onAuthCallback?.(async (urlStr) => {
-      try {
-        const url = new URL(urlStr)
-        const hash = url.hash
-        if (hash && hash.includes('access_token')) {
-          const hashParams = new URLSearchParams(hash.substring(1))
-          const access_token = hashParams.get('access_token')
-          const refresh_token = hashParams.get('refresh_token')
-          if (access_token && refresh_token) {
-            await supabase.auth.setSession({ access_token, refresh_token })
-          }
-        } else if (url.searchParams.get('code')) {
-          const code = url.searchParams.get('code')
-          await supabase.auth.exchangeCodeForSession(code)
-        }
-      } catch (err) {
-        console.error("Auth callback error:", err)
-      }
-    })
-
-    return () => {
-      subscription?.unsubscribe()
-    }
-  }, [])
-
-  useEffect(() => {
-    const handleDebugPostman = async (e) => {
-      const detail = e.detail;
-      setBottomTab('ai-debugger')
-      setShowTerminal(true)
-      setAiDebugger({ explanation: '', codeFix: '', loading: true })
-
-      let activeFileContent = ''
-      try {
-        if (typeof window.getEditorValue === 'function') {
-          activeFileContent = window.getEditorValue()
-        } else if (activeFile) {
-          const fileRes = await window.api.getFileContents(activeFile)
-          activeFileContent = fileRes.content || fileRes || ''
-        }
-      } catch (err) {
-        console.error('Could not read active file contents for AI', err)
-      }
-
-      const promptText = `The user encountered an error with an API request in the Postman client.
-Request URL: ${detail.url}
-Request Method: ${detail.method}
-Request Headers: ${JSON.stringify(detail.headers, null, 2)}
-Request Body: ${detail.body}
-
-Response Status: ${detail.responseStatus?.code} ${detail.responseStatus?.text}
-Response Body:
-${detail.response}
-
-Active File (${activeFile}):
-${activeFileContent.substring(0, 3000)}
-
-Analyze the API request and response to figure out what went wrong. Provide a fix if applicable. Return your response in exactly this format:
-EXPLANATION: <brief explanation of the error in 1-2 short sentences>
-FIX:
-<edit_file path="FULL_PATH_OF_FILE_TO_FIX">
-<search_replace>
-<search>
-the exact code to be replaced
-</search>
-<replace>
-the new code
-</replace>
-</search_replace>
-</edit_file>
-(Or just explain what the user should change in the request if the server code is not at fault.)`
-
-      try {
-        aiDebuggerStreamRef.current = ''
-        await window.api.streamAiDebugger(promptText, { model: selectedModel, customConfig: { baseURL: customBaseUrl, modelId: customModelId } })
-      } catch (err) {
-        setAiDebugger({ explanation: `Error during AI analysis: ${err.message}`, codeFix: '', loading: false })
-      }
-    }
-
-    window.addEventListener('debug-postman-request', handleDebugPostman)
-    return () => window.removeEventListener('debug-postman-request', handleDebugPostman)
-  }, [activeFile, selectedModel, customBaseUrl, customModelId])
 
   // Reactive subscription so menu shortcuts re-render when user edits bindings.
   const customShortcuts = useShortcutStore(state => state.shortcuts)
@@ -2763,16 +2401,10 @@ the new code
                   { type: 'separator' },
                   { label: 'Explorer', shortcutId: 'nav.focusExplorer', shortcut: 'Ctrl+Shift+E', action: () => setActivePanel('explorer') },
                   { label: 'Search', shortcut: 'Ctrl+Shift+F', action: () => setActivePanel('search') },
-                  { label: 'Source Control', shortcut: 'Ctrl+Shift+G', action: () => setActivePanel('git') },
-                  { label: 'Run', shortcut: 'Ctrl+Shift+D', action: () => setActivePanel('debug') },
-                  { label: 'Extensions', shortcutId: 'general.extensions', shortcut: 'Ctrl+Shift+X', action: () => setActivePanel('extensions') },
+                  { label: 'AI Chat', shortcut: 'Ctrl+Shift+I', action: () => setIsChatOpen(prev => !prev) },
                   { type: 'separator' },
-                  { label: 'Problems', shortcut: 'Ctrl+Shift+M', action: () => { setShowTerminal(true); setBottomTab('ai-debugger'); } },
-                  { label: 'Output', shortcut: 'Ctrl+Shift+U', action: () => { setShowTerminal(true); setBottomTab('terminal'); } },
-                  { label: 'Debug Console', shortcut: 'Ctrl+Shift+Y', action: () => { setShowTerminal(true); setBottomTab('debugger-history'); } },
                   { label: 'Terminal', shortcutId: 'nav.focusTerminal', shortcut: 'Ctrl+`', action: () => { 
-                    if (showTerminal && bottomTab === 'terminal') setShowTerminal(false);
-                    else { setShowTerminal(true); setBottomTab('terminal'); }
+                    setShowTerminal(prev => !prev);
                   } },
                   { type: 'separator' },
                   { label: 'Word Wrap', shortcut: 'Alt+Z', action: () => window.dispatchEvent(new CustomEvent('editor-action', { detail: 'editor.action.toggleWordWrap' })) }
@@ -2801,12 +2433,8 @@ the new code
               },
               {
                 name: 'Run', items: [
-                  { label: 'Start Debugging', shortcutId: 'debug.start', shortcut: 'F5', action: () => { setActivePanel('debug'); setTimeout(() => window.dispatchEvent(new CustomEvent('start-debugging')), 50); } },
-                  { label: 'Run Without Debugging', shortcut: 'Ctrl+F5', action: () => runFileRef.current && runFileRef.current() },
-                  { label: 'Stop Debugging', shortcutId: 'debug.stop', shortcut: 'Shift+F5', action: () => { setActivePanel('debug'); if (window.api && window.api.dapStop) { window.api.dapStop(); window.dispatchEvent(new Event('dap-stop')); } } },
-                  { type: 'separator' },
-                  { label: 'Step Over', shortcutId: 'debug.stepOver', shortcut: 'F10', action: () => { setActivePanel('debug'); if (window.api && window.api.dapStep) window.api.dapStep() } },
-                  { label: 'Continue', shortcutId: 'debug.start', shortcut: 'F5', action: () => { setActivePanel('debug'); if (window.api && window.api.dapContinue) { window.api.dapContinue(); window.dispatchEvent(new Event('dap-continue')); } } }
+                  { label: 'Run Active File', shortcut: 'Ctrl+F5', action: () => runFileRef.current && runFileRef.current() },
+                  { label: 'Run Build Task...', shortcut: 'Ctrl+Shift+B', action: () => window.dispatchEvent(new CustomEvent('show-toast', { detail: { message: 'Build task started...', type: 'info' } })) }
                 ]
               },
               {
@@ -2931,7 +2559,7 @@ the new code
           <div style={{ display: 'flex', gap: '4px', color: 'var(--text-muted)', marginRight: '8px' }}>
             <div onClick={() => setActivePanel(activePanel === 'explorer' ? null : 'explorer')} style={{ padding: '4px', borderRadius: '4px', cursor: 'pointer', display: 'flex', background: activePanel === 'explorer' ? 'var(--bg-dark)' : 'transparent' }} title="Toggle Sidebar"><PanelLeft size={14} /></div>
             <div onClick={() => setShowTerminal(!showTerminal)} style={{ padding: '4px', borderRadius: '4px', cursor: 'pointer', display: 'flex', background: showTerminal ? 'var(--bg-dark)' : 'transparent' }} title="Toggle Terminal"><PanelBottom size={14} /></div>
-            <div onClick={() => setRightPanel(rightPanel === 'chat' ? null : 'chat')} style={{ padding: '4px', borderRadius: '4px', cursor: 'pointer', display: 'flex', background: rightPanel === 'chat' ? 'var(--bg-dark)' : 'transparent' }} title="Toggle AI Agent"><PanelRight size={14} /></div>
+            <div onClick={() => setIsChatOpen(!isChatOpen)} style={{ padding: '4px', borderRadius: '4px', cursor: 'pointer', display: 'flex', background: isChatOpen ? 'var(--bg-dark)' : 'transparent' }} title="Toggle AI Chat"><Sparkles size={14} /></div>
           </div>
           <div className="model-selector-wrapper" style={{ marginRight: '8px' }}>
             <select
@@ -2966,20 +2594,20 @@ the new code
           </div>
 
           <button
-            onClick={() => setRightPanel(rightPanel === 'chat' ? null : 'chat')}
+            onClick={() => setIsChatOpen(!isChatOpen)}
             style={{
               display: 'flex', alignItems: 'center', gap: '6px',
-              background: rightPanel === 'chat' ? 'var(--bg-dark)' : 'transparent',
-              color: rightPanel === 'chat' ? 'var(--accent-color, #8b5cf6)' : 'var(--text-muted)',
-              border: `1px solid ${rightPanel === 'chat' ? 'var(--accent-color, #8b5cf6)' : 'var(--border-base)'}`,
+              background: isChatOpen ? 'var(--bg-elevated, #222)' : 'transparent',
+              color: isChatOpen ? 'var(--text-primary, #e0e0e0)' : 'var(--text-muted, #858585)',
+              border: `1px solid ${isChatOpen ? 'var(--accent-color, #ebd79e)' : 'var(--border-base, #2a2a2a)'}`,
               padding: '4px 10px', borderRadius: '6px', fontSize: '11px',
               fontWeight: '500', cursor: 'pointer', WebkitAppRegion: 'no-drag',
-              transition: 'all 0.2s'
+              transition: 'all 0.15s ease'
             }}
-            title="Toggle AI Agent"
+            title="Toggle AI Chat (Ctrl+L)"
           >
-            <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: rightPanel === 'chat' ? 'var(--accent-color, #8b5cf6)' : 'var(--text-muted)' }} />
-            AI Agent
+            <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: isChatOpen ? 'var(--accent-color, #ebd79e)' : 'var(--text-muted, #858585)' }} />
+            AI Chat
           </button>
 
           {navigator.userAgent.toLowerCase().includes('mac') ? null : (
@@ -2996,19 +2624,11 @@ the new code
 
         {/* ── Activity Bar (VS Code style) ── */}
         <ActivityBar
-          projectRoot={projectRoot}
-          onShowVisualizer={() => setShowVisualizer(true)}
-          onShowDsaExplainer={() => setDsaExplainer({ code: '', language: 'javascript' })}
-          onShowGitTimeline={() => setShowGitTimeline(true)}
           onOpenFile={handleOpenFile}
         />
 
-        {/* ── Sidebar (File Explorer / Extensions / Search / Source Control) ── */}
+        {/* ── Left Sidebar (File Explorer / Search) ── */}
         <div style={{ display: 'flex', height: '100%', borderRight: '1px solid var(--border-base)' }}>
-          {activePanel === 'auth' && (
-            <AuthPanel width={sidebarWidth} />
-          )}
-
           {activePanel === 'explorer' && (
             <Sidebar
               projectRoot={projectRoot}
@@ -3016,43 +2636,6 @@ the new code
               onOpenFile={handleOpenFile}
               width={sidebarWidth}
               setShowVisualizer={setShowVisualizer}
-            />
-          )}
-
-          {activePanel === 'extensions' && (
-            <ExtensionsPanel
-              width={sidebarWidth}
-              onOpenExtension={handleOpenExtension}
-            />
-          )}
-
-          {activePanel === 'debug' && (
-            <div style={{ width: sidebarWidth, borderRight: '1px solid var(--border-base)', overflow: 'hidden' }}>
-              <DebugPanel activeFile={activeFile} />
-            </div>
-          )}
-
-          {activePanel === 'git' && (
-            <SourceControlPanel
-              projectRoot={projectRoot}
-              width={sidebarWidth}
-              onOpenFile={handleOpenFile}
-            />
-          )}
-
-          {activePanel === 'docker' && (
-            <DockerPanel width={sidebarWidth} />
-          )}
-
-          {activePanel === 'k8s' && (
-            <KubernetesPanel width={sidebarWidth} />
-          )}
-
-          {activePanel === 'projects' && (
-            <ProjectManagerPanel
-              width={sidebarWidth}
-              setProjectRoot={setProjectRoot}
-              projectRoot={projectRoot}
             />
           )}
 
@@ -3335,14 +2918,11 @@ the new code
                       {terminals.map(term => (
                         <div
                           key={term.id}
-                          onClick={() => {
-                            setActiveTerminalId(term.id)
-                            setBottomTab('terminal')
-                          }}
+                          onClick={() => setActiveTerminalId(term.id)}
                           style={{
                             display: 'flex', alignItems: 'center', gap: '6px',
-                            background: bottomTab === 'terminal' && activeTerminalId === term.id ? 'var(--bg-surface)' : 'transparent',
-                            color: bottomTab === 'terminal' && activeTerminalId === term.id ? 'var(--text-primary)' : 'var(--text-muted)',
+                            background: activeTerminalId === term.id ? 'var(--bg-surface)' : 'transparent',
+                            color: activeTerminalId === term.id ? 'var(--text-primary)' : 'var(--text-muted)',
                             padding: '4px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '11px', fontWeight: '500'
                           }}
                         >
@@ -3359,635 +2939,30 @@ the new code
                         +
                       </button>
                     </div>
-                    <div style={{ width: '1px', height: '16px', background: 'var(--border-base)', margin: '0 8px' }}></div>
-                    <button
-                      onClick={() => setBottomTab('ai-debugger')}
-                      style={{ background: bottomTab === 'ai-debugger' ? 'var(--bg-surface)' : 'transparent', color: bottomTab === 'ai-debugger' ? 'var(--text-primary)' : 'var(--text-muted)', border: 'none', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px' }}
-                    >
-                      AI Debugger
-                    </button>
-                    <button
-                      onClick={() => setBottomTab('debugger-history')}
-                      style={{ background: bottomTab === 'debugger-history' ? 'var(--bg-surface)' : 'transparent', color: bottomTab === 'debugger-history' ? 'var(--text-primary)' : 'var(--text-muted)', border: 'none', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px' }}
-                    >
-                      Debugger History
-                    </button>
                     <div style={{ flex: 1 }}></div>
                     <button
-                      onClick={handleFixWithAi}
-                      disabled={aiDebugger.loading || isStreaming}
-                      style={{ background: 'var(--accent-color)', color: 'var(--accent-text)', border: 'none', padding: '4px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold' }}
+                      onClick={() => setShowTerminal(false)}
+                      title="Close Terminal"
+                      style={{ background: 'transparent', color: 'var(--text-muted)', border: 'none', padding: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', borderRadius: '4px' }}
                     >
-                      ✨ Fix with AI
+                      <X size={14} />
                     </button>
                   </div>
 
                   <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
                     {terminals.map(term => {
-                      const isVisible = bottomTab === 'terminal' && activeTerminalId === term.id
+                      const isVisible = activeTerminalId === term.id
                       return (
                         <div key={term.id} style={{ position: 'absolute', inset: 0, opacity: isVisible ? 1 : 0, pointerEvents: isVisible ? 'auto' : 'none', zIndex: isVisible ? 1 : 0 }}>
                           <TerminalPanel ref={el => terminalPanelRefs.current[term.id] = el} height={terminalHeight - 36} cwd={projectRoot} hideHeader={true} />
                         </div>
                       )
                     })}
-
-                    {bottomTab === 'ai-debugger' && (
-                      <div className="ai-debugger-panel" style={{ position: 'absolute', inset: 0, zIndex: 2, padding: '16px', background: 'var(--bg-deep)', display: 'flex', flexDirection: 'column' }}>
-                        {aiDebugger.loading ? (
-                          <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
-                            <div className="loading-spinner" style={{ marginBottom: '16px', fontSize: '24px' }}>⚙️</div>
-                            Analyzing terminal error...
-                          </div>
-                        ) : (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', flex: 1, minHeight: 0 }}>
-                            {aiDebugger.explanation && (
-                              <div style={{ background: 'rgba(255,255,255,0.05)', padding: '16px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)', overflowY: 'auto', maxHeight: '200px' }}>
-                                <strong style={{ display: 'block', marginBottom: '8px', color: '#10a37f' }}>Explanation:</strong>
-                                <ReactMarkdown
-                                  components={{
-                                    p: ({ node, ...props }) => <p style={{ margin: '0 0 8px 0', color: '#e2e2e2', fontSize: '13px', lineHeight: '1.5' }} {...props} />,
-                                    blockquote: ({ node, ...props }) => <blockquote style={{ margin: '0 0 8px 0', padding: '4px 12px', borderLeft: '4px solid #10a37f', color: '#a0a0a0', fontStyle: 'italic', background: 'rgba(16, 163, 127, 0.1)' }} {...props} />
-                                  }}
-                                >
-                                  {aiDebugger.explanation}
-                                </ReactMarkdown>
-                              </div>
-                            )}
-                            {aiDebugger.codeFix && (
-                              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-                                <strong style={{ display: 'block', marginBottom: '8px', color: '#e2e2e2' }}>Proposed Fix:</strong>
-                                <div style={{ flex: 1, overflow: 'auto', border: '1px solid var(--border-base)', borderRadius: '8px', background: 'var(--bg-elevated)', marginBottom: '12px' }}>
-                                  <SyntaxHighlighter language="javascript" style={vscDarkPlus} customStyle={{ margin: 0, fontSize: '13px', background: 'transparent' }}>
-                                    {(() => {
-                                      const matches = [...aiDebugger.codeFix.matchAll(/<replace>([\s\S]*?)<\/replace>/g)]
-                                      return matches.length > 0 ? matches.map(m => m[1].trim()).join('\n// ...\n') : aiDebugger.codeFix
-                                    })()}
-                                  </SyntaxHighlighter>
-                                </div>
-
-                                <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
-                                  <textarea
-                                    placeholder="Ask a follow up question (Shift+Enter for new line)..."
-                                    onKeyDown={handleDebuggerFollowUp}
-                                    disabled={aiDebugger.loading}
-                                    rows={1}
-                                    style={{
-                                      flex: 1,
-                                      background: 'rgba(255,255,255,0.05)',
-                                      color: 'white',
-                                      border: '1px solid rgba(255,255,255,0.1)',
-                                      padding: '8px 12px',
-                                      borderRadius: '6px',
-                                      fontSize: '13px',
-                                      outline: 'none',
-                                      resize: 'none',
-                                      minHeight: '36px',
-                                      fontFamily: 'inherit'
-                                    }}
-                                  />
-                                </div>
-
-                                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-                                  <button onClick={() => applyAiDebuggerFix(false)} style={{ background: 'var(--bg-light)', color: 'var(--text-main)', border: '1px solid rgba(255,255,255,0.1)', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer', fontSize: '13px' }}>Review in Editor</button>
-                                  <button onClick={() => applyAiDebuggerFix(true)} style={{ background: 'var(--accent-color)', color: 'var(--accent-text)', border: 'none', padding: '8px 20px', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold' }}>Apply & Re-run</button>
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {bottomTab === 'debugger-history' && (
-                      <div className="debugger-history-panel" style={{ position: 'absolute', inset: 0, zIndex: 2, padding: '16px', background: 'var(--bg-deep)', overflowY: 'auto' }}>
-                        {debuggerHistory.length === 0 ? (
-                          <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
-                            <p>No automated fixes applied yet.</p>
-                          </div>
-                        ) : (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                            {debuggerHistory.map((item, idx) => (
-                              <div key={idx} style={{ background: 'rgba(255,255,255,0.05)', padding: '16px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                                  <strong style={{ color: '#10a37f' }}>Fix Applied</strong>
-                                  <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{item.timestamp}</span>
-                                </div>
-                                <p style={{ margin: '0 0 12px 0', whiteSpace: 'pre-wrap', color: '#e2e2e2', fontSize: '13px' }}>{item.explanation}</p>
-                                <details>
-                                  <summary style={{ cursor: 'pointer', color: 'var(--text-muted)', fontSize: '12px', marginBottom: '8px' }}>Show Details (Terminal Error & Code Diff)</summary>
-                                  <div style={{ marginTop: '8px', padding: '12px', background: 'var(--bg-elevated)', borderRadius: '6px', border: '1px solid var(--border-base)', fontSize: '12px', color: 'var(--text-secondary)', overflowX: 'auto', whiteSpace: 'pre' }}>
-                                    <strong>Error:</strong><br />{item.error}
-                                    <hr style={{ borderColor: 'var(--border-subtle)', margin: '12px 0' }} />
-                                    <strong>Fix:</strong><br />{item.codeFix}
-                                  </div>
-                                </details>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    )}
                   </div>
                 </div>
               )}
             </div>
 
-            {rightPanel && (
-              <>
-                <Resizer
-                  orientation="vertical"
-                  onResize={(x) => setRightPanelWidth(Math.max(200, Math.min(window.innerWidth - x, 800)))}
-                />
-                <div className="right-pane" style={{ width: `${rightPanelWidth}px`, display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
-                  {/* ── Chat Panel ── */}
-                  {rightPanel === 'chat' && (
-                    <div className="chat-panel" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-                      <div className="chat-header" style={{ display: 'flex', padding: '10px 16px', borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-surface)', alignItems: 'center', gap: '8px' }}>
-                        <div className="model-selector-wrapper" style={{ flex: 1 }}>
-                          <select 
-                            className="model-selector"
-                            value={activeChatId || ''} 
-                            onChange={e => setActiveChat(e.target.value)}
-                            style={{ width: '100%', height: '28px', padding: '2px 28px 2px 8px', fontSize: '12px' }}
-                          >
-                            {chatSessions.map(session => (
-                              <option key={session.id} value={session.id}>
-                                {session.title} {session.updatedAt ? `— ${timeAgo(session.updatedAt)}` : ''}
-                              </option>
-                            ))}
-                          </select>
-                          <ChevronDown size={14} className="selector-chevron" />
-                        </div>
-                        <button 
-                          onClick={() => createChat()}
-                          title="New Chat"
-                          style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '4px', transition: 'all 0.2s ease' }}
-                          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-hover)'; e.currentTarget.style.color = 'var(--text-main)'; }}
-                          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-muted)'; }}
-                        >
-                          <Plus size={16} />
-                        </button>
-                        <button 
-                          onClick={() => { if (activeChatId) deleteChat(activeChatId); }}
-                          title="Delete Chat"
-                          style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '4px', transition: 'all 0.2s ease' }}
-                          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-hover)'; e.currentTarget.style.color = 'var(--text-main)'; }}
-                          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-muted)'; }}
-                        >
-                          <Trash2 size={15} />
-                        </button>
-                        <div style={{ width: '1px', height: '16px', background: 'var(--border-base)', margin: '0 4px' }} />
-                        <button 
-                          onClick={exportChatAsMarkdown}
-                          title="Export as Markdown"
-                          style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '4px', transition: 'all 0.2s ease' }}
-                          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-hover)'; e.currentTarget.style.color = 'var(--text-main)'; }}
-                          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-muted)'; }}
-                        >
-                          <Download size={15} />
-                        </button>
-                        <button 
-                          onClick={handleOpenShare}
-                          disabled={shareLoading}
-                          title={localStorage.getItem(`share_info_${activeChatId}`) ? "Revoke Share" : "Live Share"}
-                          style={{ background: 'transparent', border: 'none', color: localStorage.getItem(`share_info_${activeChatId}`) ? 'var(--accent-green, #34d399)' : 'var(--text-muted)', cursor: shareLoading ? 'wait' : 'pointer', padding: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '4px', transition: 'all 0.2s ease', opacity: shareLoading ? 0.5 : 1 }}
-                          onMouseEnter={(e) => { if (!shareLoading) { e.currentTarget.style.background = 'var(--bg-hover)'; e.currentTarget.style.color = 'var(--text-main)'; } }}
-                          onMouseLeave={(e) => { if (!shareLoading) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = localStorage.getItem(`share_info_${activeChatId}`) ? 'var(--accent-green, #34d399)' : 'var(--text-muted)'; } }}
-                        >
-                          <Share2 size={15} />
-                        </button>
-                      </div>
-                      {/* ── Message List ── */}
-                      <div className="message-list" style={{ flex: 1, overflowY: 'auto' }}>
-                        {messages.length === 0 && (
-                          <div className="empty-state">
-                            <div className="empty-icon">π</div>
-                            <h2>comπle AI</h2>
-                            <p>Send a prompt to start a conversation.</p>
-                            <p className="empty-hint">
-                              Try: &quot;Write a function to sort an array&quot; or &quot;Fix this bug in my auth logic&quot;
-                            </p>
-                          </div>
-                        )}
-                        {messages.map((msg, i) => (
-                          <div key={i} className={`message message-${msg.role}`}>
-                            <div className="message-body">
-                              <div className="message-header" style={{ justifyContent: 'space-between' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                  <span className="message-sender">
-                                    {msg.role === 'user' ? 'You' : (getModelName(msg.resolvedModel || msg.modelId) || 'AI Assistant')}
-                                  </span>
-                                  {msg.role === 'assistant' && msg.modelId === 'auto' && msg.resolvedModel && (
-                                    <span className="auto-badge">Auto → {getModelName(msg.resolvedModel)}</span>
-                                  )}
-                                </div>
-                                {msg.role === 'assistant' && (
-                                  <CopyButton
-                                    className="copy-msg-btn"
-                                    title="Copy Response"
-                                    textToCopy={msg.content}
-                                    style={{
-                                      background: 'transparent', border: 'none', color: 'var(--text-muted)',
-                                      cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center',
-                                      justifyContent: 'center', borderRadius: '4px', transition: 'all 0.2s ease'
-                                    }}
-                                  />
-                                )}
-                              </div>
-                              <div className="message-content">
-                                {msg.role === 'assistant' ? (
-                                  <>
-                                    {renderMessageParts(msg.content + (isStreaming && i === messages.length - 1 ? ' ▌' : ''), msg).map((part, idx) => (
-                                    part.type === 'text' ? (
-                                      <ReactMarkdown
-                                        key={idx}
-                                        components={{
-                                          code({ node, inline, className, children, ...props }) {
-                                            const match = /language-(\w+)/.exec(className || '')
-                                            return !inline && match ? (
-                                              <div className="code-block-wrapper" style={{ position: 'relative', marginTop: '10px', marginBottom: '10px' }}>
-                                                <CopyButton
-                                                  className="copy-code-btn"
-                                                  title="Copy to Clipboard"
-                                                  textToCopy={String(children).replace(/\n$/, '')}
-                                                />
-                                                <SyntaxHighlighter
-                                                  {...props}
-                                                  children={String(children).replace(/\n$/, '')}
-                                                  style={vscDarkPlus}
-                                                  language={match[1]}
-                                                  PreTag="div"
-                                                  customStyle={{ margin: 0, borderRadius: '6px', whiteSpace: 'pre-wrap', wordBreak: 'break-all', overflowX: 'auto' }}
-                                                />
-                                              </div>
-                                            ) : (
-                                              <code {...props} className={className} style={{ background: 'var(--bg-light)', padding: '2px 4px', borderRadius: '4px', fontFamily: 'monospace' }}>
-                                                {children}
-                                              </code>
-                                            )
-                                          }
-                                        }}
-                                      >
-                                        {part.content}
-                                      </ReactMarkdown>
-                                    ) : null
-                                    ))}
-
-                                  </>
-                                ) : (
-                                  <>
-                                    {msg.images && msg.images.length > 0 && (
-                                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '8px' }}>
-                                        {msg.images.map((img, i) => (
-                                          <img key={i} src={img} alt="attachment" style={{ maxWidth: '200px', maxHeight: '200px', borderRadius: '4px', objectFit: 'contain' }} />
-                                        ))}
-                                      </div>
-                                    )}
-                                    {msg.files && msg.files.length > 0 && (
-                                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '8px' }}>
-                                        {msg.files.map((f, i) => (
-                                          <div key={i} className="context-chip" style={{ cursor: 'default' }}>
-                                            <span style={{opacity: 0.7}}>📎</span> {f.name}
-                                          </div>
-                                        ))}
-                                      </div>
-                                    )}
-                                    <p>{msg.content}</p>
-                                  </>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                        <div ref={chatEndRef} />
-                      </div>
-
-                      {/* ── Global Proposed Edits ── */}
-                      {(() => {
-                        const rawPendingEdits = messages.flatMap(m => m.proposedEdits || []).filter(e => e.status === 'pending');
-                        if (rawPendingEdits.length === 0) return null;
-                        
-                        const editMap = new Map();
-                        for (const edit of rawPendingEdits) {
-                          if (editMap.has(edit.path)) {
-                            const existing = editMap.get(edit.path);
-                            existing.body += '\n' + edit.body;
-                            existing.ids.push(edit.id);
-                          } else {
-                            editMap.set(edit.path, { ...edit, ids: [edit.id] });
-                          }
-                        }
-                        const globalPendingEdits = Array.from(editMap.values());
-                        
-                        const activePlanMessage = messages.slice().reverse().find(m => m.plan && m.proposedEdits?.some(e => e.status === 'pending'));
-                        const activePlan = activePlanMessage?.plan;
-                        
-                        return (
-                          <div className="proposed-edits-card" style={{ padding: '0 12px 8px 12px', display: 'flex', flexDirection: 'column', gap: '2px', background: 'transparent' }}>
-                            {activePlan && isEditsExpanded && (
-                              <div className="plan-container" style={{ padding: '12px', marginBottom: '8px', background: 'var(--bg-light)', borderRadius: '6px', fontSize: '13px', color: 'var(--text-color)', border: '1px solid var(--border-light)' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                  <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Proposed Plan</div>
-                                  <button
-                                    onClick={() => {
-                                      const newId = `untitled:Implementation-Plan-${msg.id || Date.now()}.md`
-                                      setOpenFiles(prev => {
-                                        const exists = prev.find(f => f.path === newId)
-                                        if (exists) return prev
-                                        return [...prev, { name: 'Implementation Plan.md', path: newId, initialContent: activePlan }]
-                                      })
-                                      setActiveFile(newId)
-                                    }}
-                                    style={{
-                                      background: 'var(--bg-hover)', color: 'var(--text-main)', border: '1px solid var(--border-subtle)',
-                                      padding: '4px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px'
-                                    }}
-                                  >
-                                    Open in New Tab
-                                  </button>
-                                </div>
-                              </div>
-                            )}
-                            {isEditsExpanded && globalPendingEdits.map((edit, idx) => {
-                               const addedLines = (edit.body.match(/<replace>([\s\S]*?)<\/replace>/g) || []).reduce((acc, m) => acc + Math.max(0, m.replace(/<\/?replace>/g, '').split('\n').length - 1), 0);
-                               const removedLines = (edit.body.match(/<search>([\s\S]*?)<\/search>/g) || []).reduce((acc, m) => acc + Math.max(0, m.replace(/<\/?search>/g, '').split('\n').length - 1), 0);
-                               return (
-                                 <React.Fragment key={edit.id}>
-                                 <div 
-                                   className="edit-row"
-                                   onClick={() => {
-                                      handleOpenFile(edit.path, edit.path.split('/').pop().split('\\').pop());
-                                      setTimeout(() => window.dispatchEvent(new CustomEvent('preview-diff', { detail: { path: edit.path, body: edit.body, id: edit.ids[0], ids: edit.ids } })), 100);
-                                   }}
-                                   style={{ 
-                                     display: 'flex', 
-                                     alignItems: 'center', 
-                                     padding: '4px 6px', 
-                                     cursor: 'pointer',
-                                     borderRadius: '4px',
-                                     background: 'transparent',
-                                     transition: 'background 0.1s ease',
-                                     gap: '12px'
-                                   }}
-                                   onMouseEnter={(e) => {
-                                     e.currentTarget.style.background = 'var(--bg-light)';
-                                   }}
-                                   onMouseLeave={(e) => {
-                                     e.currentTarget.style.background = 'transparent';
-                                   }}
-                                 >
-                                   {/* Status Icon */}
-                                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '12px', height: '12px', flexShrink: 0 }}>
-                                     <div style={{ width: '6px', height: '6px', borderRadius: '50%', border: '2px solid #d4af37' }} />
-                                   </div>
-
-                                   {/* Lines Added / Removed */}
-                                   <div style={{ display: 'flex', gap: '6px', fontSize: '11px', fontFamily: 'monospace', minWidth: '40px' }}>
-                                     <span style={{ color: '#22c55e' }}>+{addedLines}</span>
-                                     <span style={{ color: '#ef4444' }}>-{removedLines}</span>
-                                   </div>
-
-                                   {/* Filename */}
-                                   <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-main)', whiteSpace: 'nowrap' }}>
-                                     {edit.path.split('/').pop().split('\\').pop()}
-                                   </span>
-
-                                   {/* Path truncation */}
-                                   <span style={{ fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', direction: 'rtl', textAlign: 'left', flex: 1, opacity: 0.5 }}>
-                                     &hellip;{edit.path.slice(Math.max(0, edit.path.length - 25))}
-                                   </span>
-                                 </div>
-                                 {edit.error && (
-                                   <div style={{ padding: '6px', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid var(--accent-rose, #ef4444)', borderRadius: '4px', marginTop: '6px', fontSize: '11px', color: 'var(--accent-rose, #ef4444)', wordBreak: 'break-word' }}>
-                                     <strong>Failed to apply:</strong> {edit.error}
-                                   </div>
-                                 )}
-                                 </React.Fragment>
-                               )
-                            })}
-                            
-                            {/* Footer Actions */}
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '4px 6px', marginTop: '2px' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-muted)', fontSize: '12px', flex: 1 }}>
-                                <File size={12} />
-                                <div style={{ display: 'flex', flexDirection: 'column', lineHeight: '1.2' }}>
-                                  <span>{globalPendingEdits.length}</span>
-                                  <span>Files</span>
-                                </div>
-                                <button onClick={() => setIsEditsExpanded(!isEditsExpanded)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '2px 4px', display: 'flex', alignItems: 'center', marginLeft: '4px' }}>
-                                  {isEditsExpanded ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
-                                </button>
-                              </div>
-                              <button onClick={() => globalPendingEdits.forEach(e => {
-                                window.dispatchEvent(new CustomEvent('cancel-preview-diff', { detail: { path: e.path } }));
-                                window.dispatchEvent(new CustomEvent('agentic-edit-error', { detail: { id: e.ids[0], ids: e.ids, isReject: true } }));
-                              })} style={{ fontSize: '12px', background: 'transparent', color: 'var(--text-muted)', border: 'none', cursor: 'pointer', padding: 0 }}>Reject<br/>all</button>
-                              
-                              <button onClick={() => globalPendingEdits.forEach(e => window.dispatchEvent(new CustomEvent('force-apply-diff', { detail: { path: e.path, body: e.body, id: e.ids[0], ids: e.ids } })))} style={{ fontSize: '12px', background: '#fde68a', color: '#000', border: 'none', borderRadius: '4px', padding: '4px 12px', cursor: 'pointer', fontWeight: 500 }}>
-                                Accept<br/>all
-                              </button>
-                            </div>
-                          </div>
-                        );
-                      })()}
-
-                      {/* ── Input Bar (Composer) ── */}
-                      <div className="input-bar">
-                        <div className="ag-composer">
-                          {attachments.length > 0 && (
-                            <div className="composer-attachments">
-                              {attachments.map((src, idx) => (
-                                <div key={idx} style={{ position: 'relative' }}>
-                                  <img src={src} alt="preview" style={{ width: '60px', height: '60px', objectFit: 'cover', borderRadius: '4px', border: '1px solid var(--border-light)' }} />
-                                  <button
-                                    onClick={() => removeAttachment(idx)}
-                                    className="remove-attachment-btn"
-                                  >
-                                    ×
-                                  </button>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-
-                          {contextMentions.length > 0 && (
-                            <div className="composer-attachments">
-                              {contextMentions.map((mention, idx) => (
-                                <div key={idx} className="context-chip">
-                                  <span style={{opacity: 0.7}}>📄</span> {mention.label}
-                                  <button
-                                    onClick={() => setContextMentions(prev => prev.filter((_, i) => i !== idx))}
-                                    className="remove-context-btn"
-                                  >
-                                    ×
-                                  </button>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-
-                          {fileAttachments.length > 0 && (
-                            <div className="composer-attachments">
-                              {fileAttachments.map((file, idx) => (
-                                <div key={idx} className="context-chip">
-                                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.8 }}>
-                                    <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
-                                  </svg>
-                                  {file.name}
-                                  <button
-                                    onClick={() => setFileAttachments(prev => prev.filter((_, i) => i !== idx))}
-                                    className="remove-context-btn"
-                                    title="Remove attachment"
-                                  >
-                                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                      <line x1="18" y1="6" x2="6" y2="18"></line>
-                                      <line x1="6" y1="6" x2="18" y2="18"></line>
-                                    </svg>
-                                  </button>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                          
-                          <div className="composer-input-row" style={{ position: 'relative' }}>
-                            {popoverState.isOpen && (
-                              <div 
-                                className="autocomplete-popover" 
-                                style={{ top: popoverState.y, left: popoverState.x }}
-                              >
-                                {popoverState.options.map((opt, idx) => (
-                                  <div
-                                    key={opt.id}
-                                    className={`popover-item ${idx === popoverState.selectedIndex ? 'selected' : ''}`}
-                                    onClick={() => applyPopoverSelection(opt)}
-                                  >
-                                    <div className="popover-item-label">{opt.label}</div>
-                                    <div className="popover-item-desc">{opt.desc}</div>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                            <input
-                              type="file"
-                              accept="image/*"
-                              multiple
-                              ref={fileInputRef}
-                              onChange={handleFileChange}
-                              style={{ display: 'none' }}
-                            />
-                            <textarea
-                              id="prompt-input"
-                              ref={textareaRef}
-                              className="prompt-input"
-                              value={prompt}
-                              onChange={handlePromptChange}
-                              onKeyDown={handleKeyDown}
-                              onPaste={handlePaste}
-                              placeholder="Ask anything, @ to mention, / for actions"
-                              rows={1}
-                              disabled={isStreaming}
-                            />
-                          </div>
-                          
-                          <div className="composer-toolbar">
-                            <div className="toolbar-left">
-                              <button
-                                className="toolbar-btn attachment-btn"
-                                onClick={handleAttachClick}
-                                title="Attach File"
-                                disabled={isStreaming}
-                              >
-                                <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-                              </button>
-                              <div 
-                                className="meta-model-selector" 
-                                ref={modelMenuBtnRef}
-                                style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', color: 'var(--text-muted)' }}
-                                onClick={(e) => {
-                                  if (!isStreaming) {
-                                    if (!isModelMenuOpen && modelMenuBtnRef.current) {
-                                      setModelMenuRect(modelMenuBtnRef.current.getBoundingClientRect());
-                                    }
-                                    setIsModelMenuOpen(!isModelMenuOpen);
-                                  }
-                                }}
-                              >
-                                <span className="meta-model" style={{ color: 'inherit' }}>
-                                  {getModelName(selectedModel)}
-                                  {selectedModel === 'auto' && resolvedModel && ` → ${getModelName(resolvedModel)}`}
-                                </span>
-                                <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none"><polyline points="18 15 12 9 6 15"></polyline></svg>
-                                
-                                {isModelMenuOpen && modelMenuRect && createPortal(
-                                  <div className="model-menu-popover" style={{
-                                    position: 'fixed',
-                                    bottom: window.innerHeight - modelMenuRect.top + 8,
-                                    left: modelMenuRect.left,
-                                    zIndex: 100000
-                                  }}>
-                                    {MODEL_GROUPS.map((group) => {
-                                      const validModels = group.models.filter(m => !m.provider || providerKeys[m.provider]?.exists);
-                                      if (validModels.length === 0) return null;
-                                      return (
-                                      <div key={group.label} className="model-menu-item">
-                                        <span>{group.label}</span>
-                                        <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none">
-                                          <polyline points="9 18 15 12 9 6"></polyline>
-                                        </svg>
-                                        <div className="model-submenu">
-                                          {validModels.map(m => (
-                                            <div 
-                                              key={m.id} 
-                                              className={`model-submenu-item ${selectedModel === m.id ? 'active' : ''}`}
-                                              onClick={(e) => {
-                                                e.stopPropagation();
-                                                setSelectedModel(m.id);
-                                                setIsModelMenuOpen(false);
-                                              }}
-                                            >
-                                              {m.id === 'custom' ? (customName || 'Custom Model') : m.name}
-                                              {m.badge ? ` (${m.badge})` : ''}
-                                            </div>
-                                          ))}
-                                        </div>
-                                      </div>
-                                      );
-                                    })}
-                                  </div>,
-                                  document.body
-                                )}
-                              </div>
-                            </div>
-                            
-                            <div className="toolbar-right">
-
-                              <button
-                                id="send-btn"
-                                className={`send-btn ${isStreaming ? 'streaming' : ''}`}
-                                onClick={handleSend}
-                                disabled={isStreaming || !prompt.trim()}
-                                title="Send (Enter)"
-                              >
-                                {isStreaming ? (
-                                  <span className="send-loader"></span>
-                                ) : (
-                                  <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
-                                    <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
-                                  </svg>
-                                )}
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-
-                </div>
-              </>
-            )}
           </div>
 
 
@@ -4086,6 +3061,21 @@ the new code
             </div>
           </footer>
         </div>
+
+        {/* ── Native AI Chat Window (Right Side of Screen) ── */}
+        {isChatOpen && (
+          <div style={{ display: 'flex', height: '100%', position: 'relative', zIndex: 10 }}>
+            <Resizer
+              orientation="vertical"
+              onResize={(x) => setChatWidth(Math.max(260, Math.min(window.innerWidth - x, 800)))}
+            />
+            <AiChatSidebar
+              width={chatWidth}
+              activeFile={activeFile}
+              onClose={() => setIsChatOpen(false)}
+            />
+          </div>
+        )}
 
         {showVisualizer && (
           <CodebaseVisualizer

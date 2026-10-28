@@ -1,4 +1,3 @@
-import { supabase } from '../lib/supabase'
 import { useAppStore } from '../store/appStore'
 
 // Keys in localStorage that we want to sync
@@ -70,26 +69,12 @@ export async function collectLocalSettings() {
 }
 
 export async function pullFromCloud() {
-  const { data, error } = await supabase.auth.getUser()
-  
-  if (error) throw error
-  if (!data?.user) throw new Error('Not authenticated')
-    
-  return data.user.user_metadata?.ide_settings || null
+  return null
 }
 
 export async function syncToCloud(payload) {
-  // Ensure we update the timestamp before pushing to the cloud
   const newTimestamp = new Date().toISOString()
   payload.updated_at = newTimestamp
-  
-  const { error } = await supabase.auth.updateUser({
-    data: { ide_settings: payload }
-  })
-  
-  if (error) throw error
-  
-  // Update local sync time to match the exact time we pushed
   localStorage.setItem(SYNC_UPDATED_AT_KEY, newTimestamp)
   return payload
 }

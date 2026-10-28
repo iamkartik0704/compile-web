@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { Folder, FolderOpen, FileCode, ChevronRight, ChevronDown, FolderSearch, FilePlus, FolderPlus, RefreshCw, Minimize2, Database } from 'lucide-react'
+import { Folder, FolderOpen, FileCode, ChevronRight, ChevronDown, FolderSearch, FilePlus, FolderPlus, RefreshCw, Minimize2 } from 'lucide-react'
 import { useFileCounts, useFolderCounts } from '../store/diagnosticsStore'
 
 // Renders a compact "3" or "!" pill next to a tree node. Kept as a
@@ -768,9 +768,6 @@ export const Sidebar = ({
               </div>
 
               <div className="sidebar-header-actions">
-                <button className="icon-btn" onClick={(e) => { e.stopPropagation(); setShowVisualizer && setShowVisualizer(true) }} title="Visualize Codebase">
-                  <Database size={16} />
-                </button>
                 <button className="icon-btn" onClick={(e) => { e.stopPropagation(); handleCreateNew('file') }} title="New File">
                   <FilePlus size={16} />
                 </button>

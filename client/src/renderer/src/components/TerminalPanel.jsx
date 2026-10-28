@@ -74,7 +74,7 @@ const getXtermTheme = (activeTheme) => {
   }
 }
 
-export const TerminalPanel = forwardRef(({ height, cwd, onFixWithAi, hideHeader }, ref) => {
+export const TerminalPanel = forwardRef(({ height, cwd, hideHeader }, ref) => {
   const terminalRef = useRef(null)
   const terminalInstance = useRef(null)
   const fitAddon = useRef(null)
@@ -266,14 +266,6 @@ export const TerminalPanel = forwardRef(({ height, cwd, onFixWithAi, hideHeader 
       {!hideHeader && (
         <div className="terminal-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingRight: '12px' }}>
           <span className="terminal-title">Terminal</span>
-          {onFixWithAi && (
-            <button 
-              onClick={onFixWithAi} 
-              style={{ background: 'var(--accent-color)', color: 'var(--accent-text)', border: 'none', padding: '2px 8px', borderRadius: '4px', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold' }}
-            >
-              ✨ Fix with AI
-            </button>
-          )}
         </div>
       )}
       <div className="terminal-wrapper" ref={terminalRef} style={{ flex: 1, overflow: 'hidden' }}></div>

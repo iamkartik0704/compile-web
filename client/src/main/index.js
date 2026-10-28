@@ -2056,11 +2056,6 @@ if (!gotTheLock) {
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore()
       mainWindow.focus()
-      
-      const url = commandLine.find(arg => arg.startsWith('comiple://'))
-      if (url) {
-        mainWindow.webContents.send('auth-callback', url)
-      }
     }
   })
   
@@ -2068,7 +2063,7 @@ if (!gotTheLock) {
     event.preventDefault()
     const mainWindow = BrowserWindow.getAllWindows()[0]
     if (mainWindow) {
-      mainWindow.webContents.send('auth-callback', url)
+      mainWindow.focus()
     }
   })
 
@@ -2285,53 +2280,6 @@ app.whenReady().then(async () => {
     }
   })
 }
-
-// ============================================================
-// AUTH TOKEN STORAGE (Secure)
-// ============================================================
-ipcMain.handle('save-auth-token', async (_event, key, value) => {
-  try {
-    if (!safeStorage.isEncryptionAvailable()) {
-      return { success: false, error: 'Encryption not available' }
-    }
-    const encrypted = safeStorage.encryptString(value)
-    const filePath = join(app.getPath('userData'), `.compile-${key}`)
-    writeFileSync(filePath, encrypted)
-    return { success: true }
-  } catch (err) {
-    return { success: false, error: err.message }
-  }
-})
-
-ipcMain.handle('get-auth-token', async (_event, key) => {
-  try {
-    if (!safeStorage.isEncryptionAvailable()) {
-      return { success: false, error: 'Encryption not available' }
-    }
-    const filePath = join(app.getPath('userData'), `.compile-${key}`)
-    if (existsSync(filePath)) {
-      const encrypted = readFileSync(filePath)
-      const decrypted = safeStorage.decryptString(encrypted)
-      return { success: true, value: decrypted }
-    }
-    return { success: true, value: null }
-  } catch (err) {
-    return { success: false, error: err.message }
-  }
-})
-
-ipcMain.handle('delete-auth-token', async (_event, key) => {
-  try {
-    const filePath = join(app.getPath('userData'), `.compile-${key}`)
-    if (existsSync(filePath)) {
-      const { unlinkSync } = require('fs')
-      unlinkSync(filePath)
-    }
-    return { success: true }
-  } catch (err) {
-    return { success: false, error: err.message }
-  }
-})
 
 app.on('window-all-closed', () => {
   terminalManager.killAll()

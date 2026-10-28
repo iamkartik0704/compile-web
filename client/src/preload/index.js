@@ -225,24 +225,6 @@ const api = {
   postmanRequest: (url, options) => ipcRenderer.invoke('postman-request', url, options),
   toggleDevTools: () => ipcRenderer.invoke('toggle-dev-tools'),
 
-  // ── Auth Token Storage & Callbacks ──
-  // Detect if running inside Electron (assuming your preload exposes ipcRenderer)
-const isElectron = typeof window !== 'undefined' && window.ipcRenderer;
-
-// --- Auth Token Storage & Callbacks ---
-saveAuthToken: async (key, value) => {
-    if (isElectron) return ipcRenderer.invoke('save-auth-token', key, value);
-    return localStorage.setItem(key, value);
-},
-getAuthToken: async (key) => {
-    if (isElectron) return ipcRenderer.invoke('get-auth-token', key);
-    return localStorage.getItem(key);
-},
-deleteAuthToken: async (key) => {
-    if (isElectron) return ipcRenderer.invoke('delete-auth-token', key);
-    return localStorage.removeItem(key);
-},
-
   // ── DSA Explainer ──
   runInstrumentedCode: (payload) => ipcRenderer.invoke('run-instrumented-code', payload),
 

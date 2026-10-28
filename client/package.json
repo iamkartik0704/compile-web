@@ -29,7 +29,6 @@
     "@electron-toolkit/utils": "^3.0.0",
     "@google/generative-ai": "^0.24.1",
     "@monaco-editor/react": "^4.7.0",
-    "@supabase/supabase-js": "^2.110.0",
     "@vscode/tree-sitter-wasm": "^0.3.1",
     "@xyflow/react": "^12.11.1",
     "acorn": "^8.17.0",

@@ -578,32 +578,21 @@ function registerProvidersForLanguage(monacoLangId) {
     return key ? lspClients.get(key) : null
   }
 
-  // ── Ghost Text Auto-Completion (Copilot) ──
+  // ── Ghost Text Auto-Completion (Tab to Accept) ──
   monaco.languages.registerInlineCompletionsProvider(monacoLangId, {
     provideInlineCompletions: async (model, position, context, token) => {
-      if (!globalAiConfig || globalAiConfig.autoCompleteEnabled === false) return { items: [], disposeInlineCompletions: () => {} }
-
-      // 1. Debounce using cancellation token.
-      // Default lowered from 2000ms to 300ms — with a 2s debounce, a
-      // continuous typist re-triggers (and cancels the prior call) more
-      // often than once every 2s, so the request never survives long
-      // enough to fire. It only ever "completed" after a long pause, which
-      // looked like "only triggers on Enter" since Enter is the most common
-      // pause point. 300ms feels instant but still absorbs normal typing
-      // cadence. Polling in small increments (instead of one long sleep)
-      // also means a fast subsequent keystroke cancels this call almost
-      // immediately instead of only checking at the very end of the wait.
-      const debounceMs = globalAiConfig.autoCompleteDelay ?? 300
+      // 1. Debounce (350ms) to prevent spamming backend on rapid typing
+      const debounceMs = 350
       const pollMs = 30
       for (let waited = 0; waited < debounceMs; waited += pollMs) {
-        if (token.isCancellationRequested) return { items: [], disposeInlineCompletions: () => {} }
+        if (token.isCancellationRequested) return { items: [] }
         await new Promise(resolve => setTimeout(resolve, pollMs))
       }
-      if (token.isCancellationRequested) return { items: [], disposeInlineCompletions: () => {} }
+      if (token.isCancellationRequested) return { items: [] }
 
-      // 2. Build Context
-      const startLine = Math.max(1, position.lineNumber - 30)
-      const endLine = Math.min(model.getLineCount(), position.lineNumber + 5)
+      // 2. Extract Prefix and Suffix
+      const startLine = Math.max(1, position.lineNumber - 35)
+      const endLine = Math.min(model.getLineCount(), position.lineNumber + 8)
 
       const prefixRange = new monaco.Range(startLine, 1, position.lineNumber, position.column)
       const suffixRange = new monaco.Range(position.lineNumber, position.column, endLine, model.getLineMaxColumn(endLine))
@@ -611,60 +600,54 @@ function registerProvidersForLanguage(monacoLangId) {
       const prefix = model.getValueInRange(prefixRange)
       const suffix = model.getValueInRange(suffixRange)
 
-      // 2.5 Extract context from other open files
-      let otherFilesContext = ''
-      if (globalOpenFiles && globalOpenFiles.length > 1) {
-        for (const f of globalOpenFiles) {
-          if (f.path !== globalActiveFile) {
-            const fileData = globalFileContents[f.path]?.content || ''
-            if (fileData) {
-              otherFilesContext += `\n<context_file path="${f.path}">\n${fileData.substring(0, 2000)}\n</context_file>`
-            }
-          }
+      if (!prefix.trim() && !suffix.trim()) return { items: [] }
+
+      // 3. Request Ghost Text from POST /api/ai/autocomplete
+      const apiHost = typeof window !== 'undefined' && window.location.hostname ? window.location.hostname : '127.0.0.1'
+      let completionText = ''
+
+      try {
+        let res
+        const payload = {
+          prefix,
+          suffix,
+          language: monacoLangId,
+          filePath: model.uri.path
         }
-      }
 
-      // 3. Prompt Construction
-      const prompt = `You are a strict code completion engine. Your ONLY job is to output the exact code to insert at the cursor position. 
-DO NOT output any conversational text. DO NOT explain the code. 
-DO NOT output markdown blocks. JUST the raw code.
-Do not repeat the prefix. Just complete what comes next.
-If the code is logically complete and no further code is needed, output EXACTLY the word "NOTHING" and nothing else.
-If you need to insert a new line, include the newline character.
-
-ADDITIONAL CONTEXT:
-${otherFilesContext || 'None'}
-
-PREFIX:
-${prefix}
-
-SUFFIX:
-${suffix}
-
-COMPLETION:`
-
-      // 4. Fetch Completion
-      const res = await window.api.getAiCompletion(prompt, globalAiConfig)
-      if (token.isCancellationRequested || !res.success || !res.text) {
-        return { items: [], disposeInlineCompletions: () => {} }
-      }
-
-      let completionText = res.text
-      // cleanup markdown if the AI ignored instructions
-      completionText = completionText.replace(/^```[a-z]*\n?/i, '')
-      completionText = completionText.replace(/\n?```$/i, '')
-
-      if (completionText.includes('```')) {
-        const match = completionText.match(/```[a-z]*\n([\s\S]*?)```/i)
-        if (match) {
-          completionText = match[1]
+        try {
+          res = await fetch('/api/ai/autocomplete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          })
+        } catch (fetchErr) {
+          res = await fetch(`http://${apiHost}:3000/api/ai/autocomplete`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          })
         }
+
+        if (token.isCancellationRequested) return { items: [] }
+        const data = await res.json()
+        completionText = data.completion || ''
+      } catch (err) {
+        console.warn('[AI Autocomplete] Request failed:', err.message)
+        return { items: [] }
       }
 
-      if (completionText.trim() === 'NOTHING') {
-        return { items: [], disposeInlineCompletions: () => {} }
+      if (token.isCancellationRequested || !completionText) {
+        return { items: [] }
       }
 
+      // Clean up accidental markdown backticks
+      completionText = completionText.replace(/^```[\w]*\n?/i, '').replace(/\n?```$/i, '')
+      if (completionText.trim() === 'NOTHING' || !completionText.trim()) {
+        return { items: [] }
+      }
+
+      // Return native Monaco ghost text
       return {
         items: [
           {
@@ -675,8 +658,8 @@ COMPLETION:`
         disposeInlineCompletions: () => {}
       }
     },
-    disposeInlineCompletions: () => { },
-    freeInlineCompletions: () => { }
+    disposeInlineCompletions: () => {},
+    freeInlineCompletions: () => {}
   })
 
   // Completion
@@ -1660,9 +1643,12 @@ export const CodeEditor = ({
   const handleEditorDidMount = (editor, monacoInstance) => {
     editorRef.current = editor
     
-    // Set up LSP logic
+    // Set up LSP logic & Ghost Text
     const monacoLangId = getLanguageFromPath(activeFile)
     registerProvidersForLanguage(monacoLangId)
+    ;['javascript', 'typescript', 'python', 'cpp', 'c', 'go', 'java', 'html', 'css', 'json', 'plaintext'].forEach(l => {
+      registerProvidersForLanguage(l)
+    })
 
     const lspKey = lspLanguageKey(monacoLangId)
     if (lspKey && lspClients.has(lspKey)) {
@@ -1697,6 +1683,18 @@ export const CodeEditor = ({
     // Expose live editor content so the AI sees unsaved changes
     window.getEditorValue = () => {
       return editor.getValue()
+    }
+
+    // Expose active file and selection context for AI Chat
+    window.getActiveEditorContext = () => {
+      const model = editor.getModel()
+      const selection = editor.getSelection()
+      const selectedText = (model && selection && !selection.isEmpty()) ? model.getValueInRange(selection) : ''
+      return {
+        filePath: activeFile || globalActiveFile || '',
+        content: editor.getValue() || '',
+        selectedText: selectedText || ''
+      }
     }
 
     // Expose save functionality for run command
@@ -1875,6 +1873,17 @@ export const CodeEditor = ({
     console.log("[Frontend] Editor mounted! Active file:", activeFile);
     editorRef.current = editor
     monacoRef.current = monacoInstance
+
+    window.getActiveEditorContext = () => {
+      const model = editor.getModel()
+      const selection = editor.getSelection()
+      const selectedText = (model && selection && !selection.isEmpty()) ? model.getValueInRange(selection) : ''
+      return {
+        filePath: activeFile || globalActiveFile || '',
+        content: editor.getValue() || '',
+        selectedText: selectedText || ''
+      }
+    }
 
     // Register whatever model is already attached at first mount —
     // onDidChangeModel below only fires on later swaps.
@@ -2586,7 +2595,7 @@ export const CodeEditor = ({
         <div className="editor-empty-actions">
           {renderEmptyAction('file.openFolder', 'Ctrl+K Ctrl+O', 'Open Folder')}
           {renderEmptyAction('file.open', 'Ctrl+O', 'Open File')}
-          {renderEmptyAction('ai.chat', 'Ctrl+L', 'Open AI Agent')}
+          {renderEmptyAction('ai.chat', 'Ctrl+L', 'Open AI Chat')}
           {renderEmptyAction('general.settings', 'Ctrl+,', 'Open Settings')}
         </div>
       </div>
@@ -3052,7 +3061,7 @@ export const CodeEditor = ({
                 cursorStyle: editorSettings.cursorStyle,
                 cursorSmoothCaretAnimation: 'on',
                 automaticLayout: true,
-                inlineSuggest: { enabled: editorSettings.inlineSuggest },
+                inlineSuggest: { enabled: editorSettings.inlineSuggest !== false, mode: 'always' },
                 'bracketPairColorization.enabled': editorSettings.bracketPairs,
                 stickyScroll: { enabled: editorSettings.stickyScroll },
                 quickSuggestions: true, // Enable classic dropdown on normal keystrokes

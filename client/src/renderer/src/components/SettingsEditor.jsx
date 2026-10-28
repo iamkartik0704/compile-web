@@ -4,8 +4,6 @@ import { useAppStore } from '../store/appStore'
 import '../assets/settings.css'
 import { AIAgentSettings } from './AIAgentSettings'
 import { CppCompilerSettings } from './CppCompilerSettings'
-import { AuthPanel } from './AuthPanel'
-import { supabase } from '../lib/supabase'
 import { collectLocalSettings, pullFromCloud, syncToCloud, mergeSettings, applySettingsLocally } from '../services/settingsSyncService'
 
 
@@ -23,19 +21,11 @@ export function SettingsEditor() {
   const [showModifiedOnly, setShowModifiedOnly] = useState(false)
   const [activeTab, setActiveTab] = useState('user')
   const [syncStatus, setSyncStatus] = useState('idle') // idle, syncing, success, error
-  const [showAuth, setShowAuth] = useState(false)
   const [syncConflict, setSyncConflict] = useState(null) // { local, remote }
 
   const handleSyncSettings = async () => {
     try {
       setSyncStatus('syncing')
-      
-      const { data: { session } } = await supabase.auth.getSession()
-      if (!session) {
-        setSyncStatus('idle')
-        setShowAuth(true)
-        return
-      }
 
       // 1. Collect local settings
       const localSettings = await collectLocalSettings()
@@ -560,16 +550,6 @@ export function SettingsEditor() {
           )}
         </div>
       </div>
-
-      {/* Auth Modal */}
-      {showAuth && (
-        <div className="settings-modal-overlay">
-          <div className="settings-modal-content">
-            <button className="settings-modal-close" onClick={() => setShowAuth(false)}>×</button>
-            <AuthPanel />
-          </div>
-        </div>
-      )}
 
       {/* Conflict Modal */}
       {syncConflict && (

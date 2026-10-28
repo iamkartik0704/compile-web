@@ -1,4 +1,6 @@
 const http = require('http');
+const express = require('express');
+const cors = require('cors');
 const { spawn } = require('child_process');
 const pty = require('node-pty');
 const { WebSocketServer } = require('ws');
@@ -6,14 +8,114 @@ const fs = require('fs').promises;
 const path = require('path');
 const { StreamMessageReader, StreamMessageWriter } = require('vscode-jsonrpc/node');
 
-// handling the running of the code (Note: window.api is an Electron frontend concept, it won't work in pure Node)
-const handleRunCode = async () => {
-  // await window.api.invoke('saveFileContents', { ... });
-  // await window.api.runFile({ filePath: activeFilePath });
+const app = express();
+app.use(cors());
+app.use(express.json({ limit: '10mb' }));
+
+// Helper to call Gemini with automatic model fallback
+const callGemini = async (contents, generationConfig = {}) => {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error('GEMINI_API_KEY not configured on server');
+
+  const models = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-pro'];
+  let lastError = null;
+
+  for (const model of models) {
+    try {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents, generationConfig })
+      });
+      const data = await res.json();
+      if (data.error) {
+        lastError = data.error.message;
+        continue;
+      }
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (text !== undefined) return text;
+    } catch (e) {
+      lastError = e.message;
+    }
+  }
+  throw new Error(lastError || 'Failed to generate content with Gemini');
 };
 
+// ── REST: AI Ghost Text / Inline Autocomplete ──
+app.post('/api/ai/autocomplete', async (req, res) => {
+  try {
+    const { prefix = '', suffix = '', language = '', filePath = '' } = req.body;
+    const prompt = `You are a strict, ultra-fast inline code autocomplete engine for a code editor.
+Language: ${language || 'code'}
+File path: ${filePath || ''}
+
+PREFIX (code before cursor):
+${prefix}
+
+SUFFIX (code after cursor):
+${suffix}
+
+TASK:
+Output ONLY the exact code characters to insert directly at the cursor position between PREFIX and SUFFIX.
+Do not repeat prefix or suffix. Return only the raw code to insert.
+No markdown code blocks. No explanations.
+If no completion is needed, output NOTHING.`;
+
+    const text = await callGemini(
+      [{ parts: [{ text: prompt }] }],
+      { temperature: 0.1, maxOutputTokens: 256, stopSequences: ['\n\n\n'] }
+    );
+
+    let completion = (text || '').replace(/^```[\w]*\n?/i, '').replace(/\n?```$/i, '');
+    if (completion.trim() === 'NOTHING') completion = '';
+    res.json({ completion });
+  } catch (err) {
+    console.error('[API Autocomplete Error]:', err.message);
+    res.json({ completion: '' });
+  }
+});
+
+// ── REST: AI Chat Sidebar ──
+app.post('/api/ai/chat', async (req, res) => {
+  try {
+    const { message, fileContext = '', selectedCode = '', activeFile = '', history = [] } = req.body;
+
+    let systemContext = `You are an expert AI programming assistant inside a modern web code editor.\n`;
+    if (activeFile) {
+      systemContext += `Active file: ${activeFile}\n`;
+    }
+    if (selectedCode && selectedCode.trim()) {
+      systemContext += `Highlighted/selected code:\n\`\`\`\n${selectedCode}\n\`\`\`\n`;
+    }
+    if (fileContext && fileContext.trim()) {
+      systemContext += `Full file content:\n\`\`\`\n${fileContext.slice(0, 12000)}\n\`\`\`\n`;
+    }
+    systemContext += `\nBe concise, direct, helpful, and provide production-ready code examples where needed. Use Markdown formatting.`;
+
+    const contents = [];
+    if (Array.isArray(history) && history.length > 0) {
+      for (const h of history.slice(-6)) {
+        contents.push({
+          role: h.role === 'user' ? 'user' : 'model',
+          parts: [{ text: h.content }]
+        });
+      }
+    }
+    contents.push({
+      role: 'user',
+      parts: [{ text: `${systemContext}\n\nUser Question:\n${message}` }]
+    });
+
+    const reply = await callGemini(contents, { temperature: 0.4, maxOutputTokens: 2048 });
+    res.json({ reply });
+  } catch (err) {
+    console.error('[API Chat Error]:', err.message);
+    res.status(500).json({ error: err.message, reply: `AI Error: ${err.message}` });
+  }
+});
+
 // Create a shared HTTP server to route multiple WebSocket endpoints
-const server = http.createServer();
+const server = http.createServer(app);
 const wssApi = new WebSocketServer({ noServer: true });
 const wssLsp = new WebSocketServer({ noServer: true });
 
@@ -125,21 +227,10 @@ wssApi.on('connection', function connection(ws) {
         return;
       }
       else if (action === 'getAiCompletion') {
-        console.log('[Backend] Real AI Completion requested');
         try {
           const promptText = typeof payload === 'string' ? payload : (payload.prompt || JSON.stringify(payload));
-          const apiKey = process.env.GEMINI_API_KEY;
-          
-          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ contents: [{ parts: [{ text: promptText }] }] })
-          });
-
-          const aiData = await response.json();
-          let completionText = aiData.candidates?.[0]?.content?.parts?.[0]?.text || '';
-          completionText = completionText.replace(/^```[\w]*\n/, '').replace(/\n```$/, '').trim();
-
+          const text = await callGemini([{ parts: [{ text: promptText }] }]);
+          let completionText = (text || '').replace(/^```[\w]*\n/, '').replace(/\n```$/, '').trim();
           data = { success: true, items: [{ insertText: completionText }] };
         } catch (error) {
           console.error('[Backend] AI API Error:', error.message);

@@ -3,7 +3,6 @@ import Editor from '@monaco-editor/react'
 import { Trash2 } from 'lucide-react'
 import { useAppStore } from '../store/appStore'
 import { Resizer } from './Resizer'
-import ReactMarkdown from 'react-markdown'
 // import { Resizer } from './Resizer'
 
 export function PostmanView() {
@@ -28,26 +27,6 @@ export function PostmanView() {
   const containerRef = useRef(null)
   const reqEditorRef = useRef(null)
   const resEditorRef = useRef(null)
-
-  const [responseTab, setResponseTab] = useState('Response')
-  const [aiDebugger, setAiDebugger] = useState({ explanation: '', codeFix: '', loading: false })
-
-  useEffect(() => {
-    if (window.api && window.api.onPostmanDebuggerStream) {
-      window.api.onPostmanDebuggerStream((chunk) => {
-        setAiDebugger(prev => {
-          const text = prev.explanation + chunk
-          const marker = "FIX:\n"
-          const idx = text.indexOf(marker)
-          if (idx !== -1) {
-            return { ...prev, explanation: text.substring(0, idx).replace('EXPLANATION:', '').trim(), codeFix: text.substring(idx + marker.length).trim(), loading: false }
-          } else {
-            return { ...prev, explanation: text.replace('EXPLANATION:', '').trim(), loading: false }
-          }
-        })
-      })
-    }
-  }, [])
 
   useEffect(() => {
     const handleEditorAction = async (e) => {
@@ -427,128 +406,34 @@ export function PostmanView() {
                 <span>Status: <span style={{ color: statusColor, fontWeight: 500 }}>{responseStatus.code} {responseStatus.text}</span></span>
                 <span>Time: <span style={{ color: '#10a37f', fontWeight: 500 }}>{responseTime} ms</span></span>
                 {responseSize && <span>Size: <span style={{ color: '#10a37f', fontWeight: 500 }}>{formatBytes(responseSize)}</span></span>}
-                <button
-                  onClick={() => {
-                    const reqHeaders = headers.filter(h => h.enabled && h.key).reduce((acc, h) => ({ ...acc, [h.key]: h.value }), {})
-                    if (bodyType === 'raw' && !reqHeaders['Content-Type']) {
-                      const contentTypeMap = { 'JSON': 'application/json', 'HTML': 'text/html', 'XML': 'application/xml', 'JavaScript': 'application/javascript', 'Text': 'text/plain' }
-                      reqHeaders['Content-Type'] = contentTypeMap[rawBodyType] || 'text/plain'
-                    } else if (bodyType === 'x-www-form-urlencoded') {
-                      reqHeaders['Content-Type'] = 'application/x-www-form-urlencoded'
-                    }
-                    
-                    setResponseTab('AI Debugger')
-                    setAiDebugger({ explanation: '', codeFix: '', loading: true })
-
-                    let activeFileContent = ''
-                    try {
-                      if (typeof window.getEditorValue === 'function') {
-                        activeFileContent = window.getEditorValue() || ''
-                      }
-                    } catch (e) {}
-
-                    const promptText = `The user encountered an error with an API request in the Postman client.
-Request URL: ${url}
-Request Method: ${method}
-Request Headers: ${JSON.stringify(reqHeaders, null, 2)}
-Request Body: ${bodyContent}
-
-Response Status: ${responseStatus?.code} ${responseStatus?.text}
-Response Body:
-${response}
-
-Active File content from their IDE:
-${activeFileContent.substring(0, 3000)}
-
-Analyze the API request and response to figure out what went wrong. Provide a fix if applicable. Return your response in exactly this format:
-EXPLANATION: <brief explanation of the error in 1-2 short sentences>
-FIX:
-<explain the fix or provide a code edit block if server code needs changing>`
-
-                    if (window.api && window.api.streamAiDebugger) {
-                      window.api.streamAiDebugger(promptText, { emitEvent: 'postman-debugger-stream' })
-                        .catch(err => {
-                          setAiDebugger({ explanation: `Error: ${err.message}`, codeFix: '', loading: false })
-                        })
-                    }
-                  }}
-                  style={{ background: 'var(--accent-color)', color: 'var(--accent-text)', border: 'none', padding: '4px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold', marginLeft: '10px' }}
-                >
-                  ✨ Debug with AI
-                </button>
               </div>
             )}
           </div>
           <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-            {responseTab === 'Response' ? (
-              response === null && !loading ? (
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1, color: 'var(--text-muted)' }}>
-                  Enter the URL and click Send to get a response
-                </div>
-              ) : loading ? (
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1, color: 'var(--text-muted)' }}>
-                  Sending request...
-                </div>
-              ) : (
-                <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
-                  <Editor
-                    height="100%"
-                    language={response && (response.trim().startsWith('{') || response.trim().startsWith('[')) ? 'json' : 'plaintext'}
-                    theme={monacoTheme}
-                    value={response}
-                    onMount={(editor) => { resEditorRef.current = editor }}
-                    options={{ 
-                      minimap: { enabled: false }, 
-                      readOnly: true, 
-                      scrollBeyondLastLine: false, 
-                      wordWrap: 'on',
-                      scrollbar: { vertical: 'visible', verticalScrollbarSize: 10 } 
-                    }}
-                  />
-                </div>
-              )
+            {response === null && !loading ? (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1, color: 'var(--text-muted)' }}>
+                Enter the URL and click Send to get a response
+              </div>
+            ) : loading ? (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1, color: 'var(--text-muted)' }}>
+                Sending request...
+              </div>
             ) : (
-              <div style={{ flex: 1, overflowY: 'auto', padding: '20px', background: 'var(--bg-deep)' }} className="custom-scroll">
-                {aiDebugger.loading ? (
-                  <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '40px' }}>
-                    <div className="loading-spinner" style={{ marginBottom: '16px', fontSize: '24px' }}>⚙️</div>
-                    Analyzing request and response...
-                  </div>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                    {aiDebugger.explanation && (
-                      <div style={{ background: 'rgba(255,255,255,0.05)', padding: '20px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)' }}>
-                        <strong style={{ display: 'block', marginBottom: '12px', color: '#10a37f', fontSize: '14px' }}>Explanation:</strong>
-                        <ReactMarkdown
-                          components={{
-                            p: ({ node, ...props }) => <p style={{ margin: '0 0 10px 0', color: 'var(--text-primary)', fontSize: '13px', lineHeight: '1.6' }} {...props} />,
-                            blockquote: ({ node, ...props }) => <blockquote style={{ margin: '0 0 10px 0', padding: '8px 16px', borderLeft: '4px solid #10a37f', color: 'var(--text-muted)', fontStyle: 'italic', background: 'rgba(16, 163, 127, 0.1)' }} {...props} />
-                          }}
-                        >
-                          {aiDebugger.explanation}
-                        </ReactMarkdown>
-                      </div>
-                    )}
-                    {aiDebugger.codeFix && (
-                      <div style={{ background: 'rgba(255,255,255,0.05)', padding: '20px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)' }}>
-                        <strong style={{ display: 'block', marginBottom: '12px', color: '#8b5cf6', fontSize: '14px' }}>Suggested Fix:</strong>
-                        <ReactMarkdown
-                          components={{
-                            pre: ({ node, ...props }) => <pre style={{ background: '#1e1e1e', padding: '12px', borderRadius: '6px', overflowX: 'auto', border: '1px solid #333' }} {...props} />,
-                            code: ({ node, inline, ...props }) => 
-                              inline ? <code style={{ background: 'rgba(255,255,255,0.1)', padding: '2px 4px', borderRadius: '4px', fontSize: '12px' }} {...props} />
-                                     : <code style={{ fontSize: '13px', fontFamily: "'Fira Code', monospace" }} {...props} />
-                          }}
-                        >
-                          {aiDebugger.codeFix}
-                        </ReactMarkdown>
-                      </div>
-                    )}
-                    {!aiDebugger.loading && !aiDebugger.explanation && (
-                      <div style={{ color: 'var(--text-muted)' }}>Click "Debug with AI" to analyze this request.</div>
-                    )}
-                  </div>
-                )}
+              <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+                <Editor
+                  height="100%"
+                  language={response && (response.trim().startsWith('{') || response.trim().startsWith('[')) ? 'json' : 'plaintext'}
+                  theme={monacoTheme}
+                  value={response}
+                  onMount={(editor) => { resEditorRef.current = editor }}
+                  options={{ 
+                    minimap: { enabled: false }, 
+                    readOnly: true, 
+                    scrollBeyondLastLine: false, 
+                    wordWrap: 'on',
+                    scrollbar: { vertical: 'visible', verticalScrollbarSize: 10 } 
+                  }}
+                />
               </div>
             )}
           </div>
