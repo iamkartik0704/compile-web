@@ -24,8 +24,6 @@ export const defaultShortcuts = [
     items: [
       { id: 'file.new', name: 'New File', keys: ['Ctrl', 'N'] },
       { id: 'file.open', name: 'Open File', keys: ['Ctrl', 'O'] },
-      { id: 'file.openFolder', name: 'Open Folder', keys: ['Ctrl', 'K', 'Ctrl', 'O'] },
-      { id: 'file.closeFolder', name: 'Close Folder', keys: ['Ctrl', 'K', 'F'] },
       { id: 'file.save', name: 'Save', keys: ['Ctrl', 'S'] },
       { id: 'file.saveAs', name: 'Save As', keys: ['Ctrl', 'Shift', 'S'] },
       { id: 'file.saveAll', name: 'Save All', keys: ['Ctrl', 'K', 'S'] },

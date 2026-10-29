@@ -362,12 +362,14 @@ export function AiChatSidebar({ width, activeFile, onClose }) {
         .slice(-6)
         .map(m => ({ role: m.role, content: m.content }))
 
+      const customApiKey = localStorage.getItem('user-gemini-api-key')
       const payload = {
         message: messageToSend,
         fileContext: fileContent,
         selectedCode,
         activeFile: filePath,
-        history
+        history,
+        apiKey: customApiKey || undefined
       }
 
       // Try via relative /api/ endpoint first (works via nginx on port 8000), fallback to direct backend

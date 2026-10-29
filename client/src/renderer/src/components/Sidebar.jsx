@@ -583,8 +583,8 @@ export const Sidebar = ({
     setContextMenu(null)
     setDialog({
       type: 'confirm',
-      title: 'Confirm Delete',
-      message: `Are you sure you want to delete '${item.name}'?`,
+      title: 'Delete',
+      message: `Are you sure you want to delete '${item.name}'? This cannot be undone.`,
       onConfirm: async () => {
         setDialog(null)
         const res = await window.api.deleteItem(item.path, projectRoot)
@@ -594,27 +594,6 @@ export const Sidebar = ({
           window.dispatchEvent(new CustomEvent('show-toast', { detail: { message: `Deleted '${item.name}'`, type: 'success' } }))
         } else {
           setDialog({ type: 'alert', title: 'Delete Failed', message: res?.error || 'Failed to delete item', onConfirm: () => setDialog(null) })
-        }
-      },
-      onCancel: () => setDialog(null)
-    })
-  }
-
-  const handleDeletePermanent = async (item) => {
-    setContextMenu(null)
-    setDialog({
-      type: 'confirm',
-      title: 'Permanent Delete',
-      message: `Are you sure you want to permanently delete '${item.name}'? This cannot be undone.`,
-      onConfirm: async () => {
-        setDialog(null)
-        const res = window.api.deleteItemPermanent ? await window.api.deleteItemPermanent(item.path, projectRoot) : await window.api.deleteItem(item.path, projectRoot)
-        if (res?.success) {
-          handleRefresh()
-          window.dispatchEvent(new CustomEvent('file-deleted', { detail: { path: item.path } }))
-          window.dispatchEvent(new CustomEvent('show-toast', { detail: { message: `Permanently deleted '${item.name}'`, type: 'success' } }))
-        } else {
-          setDialog({ type: 'alert', title: 'Delete Failed', message: res?.error || 'Failed to permanently delete item', onConfirm: () => setDialog(null) })
         }
       },
       onCancel: () => setDialog(null)
@@ -880,7 +859,6 @@ export const Sidebar = ({
           <div className="editor-context-menu-separator"></div>
           <div className="editor-context-menu-item" onClick={() => handleRenameStart(contextMenu.targetItem)}>Rename</div>
           <div className="editor-context-menu-item delete" onClick={() => handleDelete(contextMenu.targetItem)}>Delete</div>
-          <div className="editor-context-menu-item delete-permanent" onClick={() => handleDeletePermanent(contextMenu.targetItem)} style={{ color: '#f48771' }}>Delete Permanently</div>
         </div>
       )}
 

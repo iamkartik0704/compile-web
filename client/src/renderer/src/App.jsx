@@ -1146,15 +1146,7 @@ fetchKeys.then((result) => {
         window.close()
         return true
       case 'file.openFolder':
-        if (window.api.selectFolder) {
-          window.api.selectFolder().then(p => {
-            if (p) {
-              const recents = JSON.parse(localStorage.getItem('recentFolders') || '[]')
-              if (!recents.includes(p)) localStorage.setItem('recentFolders', JSON.stringify([p, ...recents].slice(0, 5)))
-              setProjectRoot(p)
-            }
-          })
-        }
+        setActivePanel('explorer')
         return true
       case 'general.shortcuts':
         handleOpenFile('settings:shortcuts', 'Keyboard Shortcuts')
@@ -1163,6 +1155,7 @@ fetchKeys.then((result) => {
         saveActiveFile()
         return true
       case 'file.closeFolder':
+        return true
         setProjectRoot(null)
         return true
       case 'general.run':
@@ -1988,7 +1981,7 @@ CRITICAL RULE: If the file is empty, or you are creating a new file from scratch
     const handleReload = async () => {
       if (window.api && window.api.getAllKeys) {
         const keys = await window.api.getAllKeys()
-        setProviderKeys(keys)
+        setProviderKeys(keys || {})
       }
       if (window.api && window.api.getCustomConfig) {
         const config = await window.api.getCustomConfig()
@@ -2000,6 +1993,7 @@ CRITICAL RULE: If the file is empty, or you are creating a new file from scratch
       }
       setAutoCompleteEnabled(localStorage.getItem('editor-inlineSuggest') !== 'false')
     }
+    handleReload()
     window.addEventListener('reload-ai-config', handleReload)
     return () => window.removeEventListener('reload-ai-config', handleReload)
   }, [])
@@ -2891,9 +2885,11 @@ CRITICAL RULE: If the file is empty, or you are creating a new file from scratch
                   )}
                 </span>
               )}
-              <span className="status-item" style={{ cursor: 'pointer' }} onClick={() => setShowSettings(true)} title="Settings">
-                {keyCount > 0 ? (
-                  <span className="status-key-ok"><Key size={12} /> {keyCount} key{keyCount > 1 ? 's' : ''}</span>
+              <span className="status-item" style={{ cursor: 'pointer' }} onClick={() => setShowSettings(true)} title="AI Settings">
+                {providerKeys.google?.exists ? (
+                  <span className="status-key-ok" style={{ color: 'var(--accent-color, #ebd79e)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                    <Key size={12} /> Gemini: Active
+                  </span>
                 ) : (
                   <span className="status-key-none"><Key size={12} /> No Keys</span>
                 )}

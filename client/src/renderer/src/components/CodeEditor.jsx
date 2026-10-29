@@ -608,11 +608,13 @@ function registerProvidersForLanguage(monacoLangId) {
 
       try {
         let res
+        const customApiKey = localStorage.getItem('user-gemini-api-key')
         const payload = {
           prefix,
           suffix,
           language: monacoLangId,
-          filePath: model.uri.path
+          filePath: model.uri.path,
+          apiKey: customApiKey || undefined
         }
 
         try {
@@ -2607,7 +2609,7 @@ export const CodeEditor = ({
         </div>
         
         <div className="editor-empty-actions">
-          {renderEmptyAction('file.openFolder', 'Ctrl+K Ctrl+O', 'Open Folder')}
+          {renderEmptyAction('file.new', 'Ctrl+N', 'New File')}
           {renderEmptyAction('file.open', 'Ctrl+O', 'Open File')}
           {renderEmptyAction('ai.chat', 'Ctrl+L', 'Open AI Chat')}
           {renderEmptyAction('general.settings', 'Ctrl+,', 'Open Settings')}

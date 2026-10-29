@@ -5,6 +5,7 @@ const { spawn } = require('child_process');
 const pty = require('node-pty');
 const { WebSocketServer } = require('ws');
 const fs = require('fs').promises;
+const fsSync = require('fs');
 const path = require('path');
 const { StreamMessageReader, StreamMessageWriter } = require('vscode-jsonrpc/node');
 
@@ -13,9 +14,9 @@ app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
 // Helper to call Gemini with automatic model fallback
-const callGemini = async (contents, generationConfig = {}) => {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error('GEMINI_API_KEY not configured on server');
+const callGemini = async (contents, generationConfig = {}, customApiKey = null) => {
+  const apiKey = (customApiKey && customApiKey.trim()) || process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error('GEMINI_API_KEY not configured on server or in settings');
 
   const models = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-pro'];
   let lastError = null;
@@ -41,10 +42,17 @@ const callGemini = async (contents, generationConfig = {}) => {
   throw new Error(lastError || 'Failed to generate content with Gemini');
 };
 
+// ── REST: AI Configuration Status ──
+app.get('/api/ai/config', (req, res) => {
+  const hasKey = Boolean(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.trim());
+  const hint = hasKey ? ('...' + process.env.GEMINI_API_KEY.slice(-4)) : null;
+  res.json({ hasGeminiKey: hasKey, geminiKeyHint: hint, model: 'gemini-2.5-flash' });
+});
+
 // ── REST: AI Ghost Text / Inline Autocomplete ──
 app.post('/api/ai/autocomplete', async (req, res) => {
   try {
-    const { prefix = '', suffix = '', language = '', filePath = '' } = req.body;
+    const { prefix = '', suffix = '', language = '', filePath = '', apiKey = null } = req.body;
     const prompt = `You are a strict, ultra-fast inline code autocomplete engine for a code editor.
 Language: ${language || 'code'}
 File path: ${filePath || ''}
@@ -63,7 +71,8 @@ If no completion is needed, output NOTHING.`;
 
     const text = await callGemini(
       [{ parts: [{ text: prompt }] }],
-      { temperature: 0.1, maxOutputTokens: 256, stopSequences: ['\n\n\n'] }
+      { temperature: 0.1, maxOutputTokens: 256, stopSequences: ['\n\n\n'] },
+      apiKey
     );
 
     let completion = (text || '').replace(/^```[\w]*\n?/i, '').replace(/\n?```$/i, '');
@@ -78,7 +87,7 @@ If no completion is needed, output NOTHING.`;
 // ── REST: AI Chat Sidebar ──
 app.post('/api/ai/chat', async (req, res) => {
   try {
-    const { message, fileContext = '', selectedCode = '', activeFile = '', history = [] } = req.body;
+    const { message, fileContext = '', selectedCode = '', activeFile = '', history = [], apiKey = null } = req.body;
 
     let systemContext = `You are an expert AI programming assistant inside a modern web code editor.\n`;
     if (activeFile) {
@@ -106,7 +115,7 @@ app.post('/api/ai/chat', async (req, res) => {
       parts: [{ text: `${systemContext}\n\nUser Question:\n${message}` }]
     });
 
-    const reply = await callGemini(contents, { temperature: 0.4, maxOutputTokens: 2048 });
+    const reply = await callGemini(contents, { temperature: 0.4, maxOutputTokens: 2048 }, apiKey);
     res.json({ reply });
   } catch (err) {
     console.error('[API Chat Error]:', err.message);
@@ -121,12 +130,50 @@ const wssLsp = new WebSocketServer({ noServer: true });
 
 const WORKSPACE_ROOT = '/workspace';
 
+// Live file watcher on WORKSPACE_ROOT for auto-refreshing explorer
+const fsWatchers = new Map();
+function startWatcherForWs(ws) {
+  try {
+    if (!fsSync.existsSync(WORKSPACE_ROOT)) return;
+    let debounceTimer = null;
+    const watcher = fsSync.watch(WORKSPACE_ROOT, { recursive: true }, (eventType, filename) => {
+      if (filename && (filename.startsWith('.') || filename.includes('node_modules') || filename.includes('.git'))) {
+        return;
+      }
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        try {
+          if (ws.readyState === 1) { // WebSocket.OPEN
+            ws.send(JSON.stringify({ event: 'fs-changed', data: { eventType, filename } }));
+          }
+        } catch (_) {}
+      }, 250);
+    });
+    fsWatchers.set(ws, watcher);
+  } catch (err) {
+    console.error('[Backend] fs.watch error:', err.message);
+  }
+}
+
 // ==========================================
 // 1. MAIN API & TERMINAL WEBSOCKET (Route: /)
 // ==========================================
 wssApi.on('connection', function connection(ws) {
   let shellProcess = null;
   console.log('[Backend] Client connected to IDE API/Terminal');
+  startWatcherForWs(ws);
+
+  ws.on('close', () => {
+    if (shellProcess) {
+      try { shellProcess.kill(); } catch (_) {}
+      shellProcess = null;
+    }
+    const watcher = fsWatchers.get(ws);
+    if (watcher) {
+      try { watcher.close(); } catch (_) {}
+      fsWatchers.delete(ws);
+    }
+  });
 
   ws.on('message', async function message(rawData) {
     try {
@@ -183,19 +230,46 @@ wssApi.on('connection', function connection(ws) {
       }
       else if (action === 'createTerminal') {
         console.log('[Backend] Spawning interactive shell');
+        if (shellProcess) {
+          try { shellProcess.kill(); } catch (_) {}
+          shellProcess = null;
+        }
         
         shellProcess = pty.spawn('bash', [], {
           name: 'xterm-256color',
-          cols: 80,
-          rows: 24,
+          cols: (payload && payload.cols) || 80,
+          rows: (payload && payload.rows) || 24,
           cwd: '/workspace',
           env: process.env
         });
+
+        const terminalId = (payload && payload.id) || ('term_' + Date.now());
 
         shellProcess.onData((terminalData) => {
           ws.send(JSON.stringify({ type: 'terminal-data', data: terminalData }));
         });
 
+        shellProcess.onExit((code) => {
+          try {
+            if (ws.readyState === 1) {
+              ws.send(JSON.stringify({ type: 'terminal-exit', data: { exitCode: code } }));
+            }
+          } catch (_) {}
+        });
+
+        ws.send(JSON.stringify({ id, data: { success: true, terminalId } }));
+        return;
+      }
+      else if (action === 'killTerminal') {
+        console.log('[Backend] Killing terminal shell process');
+        if (shellProcess) {
+          try {
+            shellProcess.kill();
+          } catch (e) {
+            console.error('[Backend] killTerminal error:', e.message);
+          }
+          shellProcess = null;
+        }
         ws.send(JSON.stringify({ id, data: { success: true } }));
         return;
       }
@@ -204,6 +278,19 @@ wssApi.on('connection', function connection(ws) {
         return;
       }
       else if (action === 'resizeTerminal') {
+        if (shellProcess && payload && payload.cols && payload.rows) {
+          try {
+            shellProcess.resize(Number(payload.cols), Number(payload.rows));
+          } catch (_) {}
+        }
+        data = { success: true };
+      }
+      else if (action === 'getAiConfig') {
+        const hasKey = Boolean(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.trim());
+        const hint = hasKey ? ('...' + process.env.GEMINI_API_KEY.slice(-4)) : null;
+        data = { hasGeminiKey: hasKey, geminiKeyHint: hint, model: 'gemini-2.5-flash' };
+      }
+      else if (action === 'watchProject') {
         data = { success: true };
       }
       else if (action === 'runFile') {
