@@ -179,5 +179,4 @@ compile-web/
 ---
 
 ## License
-
-This repository does not currently include an explicit root license file. The package metadata in `client/package.json` references the MIT license. Please check with the repository owner for formal licensing terms before commercial use or redistribution.
+This project is open-source under the [MIT License](LICENSE).
