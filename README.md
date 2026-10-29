@@ -1,185 +1,183 @@
-# comπle Web: Containerized Browser-Based IDE with AI Intelligence
+# comπle Web
 
-> A high-performance, containerized web code editor featuring Monaco Editor, real-time bash pseudo-terminals, language servers, and native Google Gemini AI integration (inline Ghost Text completions & contextual chat).
-
----
-
-## 📖 Overview
-
-**comπle Web** is an extensible, browser-accessible Integrated Development Environment (IDE). Originally conceived as an Electron-based desktop application, this project was systematically re-engineered and containerized using **Docker** into a client-server architecture capable of running inside any modern web browser while preserving low-latency editor performance, real interactive shell execution, and intelligent code assistance.
+A containerized, browser-based code editor built on React, Monaco Editor, and Node.js with native Google Gemini integration for inline ghost text completions and contextual code assistance.
 
 ---
 
-## 🏗️ Architectural Evolution: From Electron to Dockerized Web IDE
+## Overview
 
-### The Starting Point: Desktop Electron Architecture
-In its original Electron architecture:
-- The **Electron Main Process** held direct access to host OS resources: Node.js `fs`, native `child_process`, and binary addons like `node-pty`.
-- The **Renderer Process** (React + Monaco Editor) interfaced through Electron's synchronous/asynchronous IPC channels (`ipcRenderer.invoke` -> `ipcMain.handle`) exposed via `preload.js` on `window.api`.
-- Operating system file dialogs (`dialog.showOpenDialog`) accessed arbitrary host directory paths directly.
+comπle Web is a lightweight development environment designed to run inside any modern web browser. The project originated as an Electron desktop application and was re-engineered into a decoupled client-server web architecture using Docker. This shift eliminates platform-specific desktop installations while maintaining low-latency code editing, language server support, interactive shell access, and AI assistance.
+
+---
+
+## Architectural Migration: From Electron to Web
+
+### The Original Desktop Architecture
+
+In the initial Electron setup:
+- The **Electron Main Process** held privileged access to the local host operating system, spawning native processes (`node-pty`, compiler toolchains) and directly interacting with the filesystem via Node's `fs` module.
+- The **Renderer Process** (React and Monaco Editor) communicated with the main process across Electron's asynchronous and synchronous IPC channels (`ipcRenderer.invoke` -> `ipcMain.handle`), exposed through a `preload.js` script on the `window.api` global object.
+- File and directory pickers relied on native OS window dialogs (`dialog.showOpenDialog`) to select host directories.
 
 ```
-[ Electron Desktop App ]
-┌────────────────────────────────────────────────────────┐
-│  Renderer (React + Monaco UI)                         │
-│       │ (Preload ContextBridge)                        │
-│       ▼                                                │
-│  Main Process (Node.js, local fs, pty, compilers)      │
-│       │                                                │
-│  Host Operating System (Windows / macOS / Linux)       │
-└────────────────────────────────────────────────────────┘
++--------------------------------------------------------+
+|  Electron Desktop Application                          |
+|                                                        |
+|  Renderer (React + Monaco Editor UI)                   |
+|       |                                                |
+|       | (IPC via contextBridge / preload.js)           |
+|       v                                                |
+|  Main Process (Node.js, local fs, node-pty, toolchains)|
+|       |                                                |
+|       v                                                |
+|  Host Operating System (Windows / macOS / Linux)       |
++--------------------------------------------------------+
 ```
 
-### The Web Migration Challenge
-Migrating a desktop IDE to a standard web browser introduces critical hurdles:
-1. **Browser Sandbox Restrictions**: Web browsers cannot execute arbitrary shell processes, spawn system compilers (`g++`, `clangd`), or directly write to the host file system.
-2. **Browser Shortcut Collisions**: Crucial IDE keybindings (<kbd>Ctrl</kbd> + <kbd>O</kbd>, <kbd>Ctrl</kbd> + <kbd>S</kbd>, <kbd>Ctrl</kbd> + <kbd>P</kbd>) are hijacked by Chrome/browser default actions (e.g. Chrome navigating away to open raw local files).
-3. **Massive Codebase Coupling**: Hundreds of UI components relied on `window.api.<method>()` desktop semantics. Completely rewriting every frontend component would introduce regressions and high maintenance overhead.
+### Challenges of Migrating to the Browser
+
+Transitioning this application to run in a web browser presented several technical constraints:
+
+1. **Absence of Host Filesystem Access**: Modern browsers execute in a strict sandbox. Client-side JavaScript cannot directly access the host machine's filesystem or invoke compilers like `g++` and `clangd`.
+2. **Terminal and Process Spawning**: Web applications cannot spawn POSIX pseudo-terminals (`node-pty`) on the client; terminal execution requires a server-side shell environment piped over a duplex transport.
+3. **Browser Keybinding Collisions**: Crucial code editor shortcuts (such as `Ctrl+O` for opening files, `Ctrl+S` for saving, and `Ctrl+P` for navigation) are intercepted by default browser behaviors, causing tabs to navigate away or print page dialogs to open.
+4. **Codebase Coupling**: The frontend codebase contained hundreds of references to `window.api.<method>()`. Rewriting all component calls to disparate HTTP endpoints would introduce significant regression risk.
 
 ---
 
-## 🐳 How Docker Transformed the Architecture
+## How Docker Enabled the Migration
 
-Docker served as the foundational pillar to bridge the desktop-to-web paradigm, containerizing the runtime environment into two decoupled microservices:
+Docker provided the isolation and runtime environment necessary to transform the monolithic Electron app into a decoupled, reproducible client-server system.
 
 ```
-                                [ Modern Web Browser ]
-                             http://localhost:8000
-                                       │
-                    ┌──────────────────┴──────────────────┐
-                    │ HTTP (Static SPA)      HTTP /api/*  │
-                    ▼                                     ▼
-┌──────────────────────────────────────┐  ┌──────────────────────────────────────┐
-│       Frontend Container (Nginx)     │  │       Backend Container (Node.js)    │
-│  - Multi-stage Vite build            │  │  - Headless Execution Engine         │
-│  - Serves React + Monaco bundle      │  │  - WebSocket API & JSON-RPC Gateway  │
-│  - Reverse-proxies /api/ to backend  │  │  - Interactive PTY (node-pty + bash) │
-│  - SPA routing fallback              │  │  - Language Servers (clangd, gopls)  │
-└──────────────────────────────────────┘  │  - Recursive File Watcher (fs.watch) │
-                                          └──────────────────┬───────────────────┘
-                                                             │
-                                                  Mounted Volume Storage
-                                                  ./test-workspace ➔ /workspace
+                               Web Browser Client
+                            (http://localhost:8000)
+                                       |
+                    +------------------+------------------+
+                    | HTTP (Static Assets)   HTTP /api/*  |
+                    v                                     v
++--------------------------------------+  +--------------------------------------+
+|       Frontend Container (Nginx)     |  |       Backend Container (Node.js)    |
+|  - Multi-stage Vite build            |  |  - Express REST & WebSocket server   |
+|  - Serves React + Monaco bundle      |  |  - Interactive PTY (node-pty + bash) |
+|  - Reverse-proxies /api/ to backend  |  |  - Embedded LSPs (clangd, gopls, etc)|
+|  - Cache-busting headers for index   |  |  - Real-time fs.watch event emitter  |
++--------------------------------------+  +--------------------------------------+
+                                                             |
+                                                  Mounted Workspace Volume
+                                               ./test-workspace -> /workspace
 ```
 
-### 1. The Headless Backend Execution Engine (`compile-backend`)
-- **Docker Base**: Built on `node:20-bookworm-slim` to support compiling native C++ addons (`node-pty` built against POSIX pseudo-terminals).
-- **Embedded Toolchains**: Pre-installs `g++`, `clangd` (C/C++), `golang` & `gopls` (Go), `default-jdk` & `Eclipse JDTLS` (Java), and `pyright` (Python).
-- **Terminal Streaming**: Spawns real interactive `bash` pseudo-terminals over WebSockets, piping ANSI terminal data back and forth between the backend container and `xterm.js` in the browser.
-- **Real-Time File System Watcher**: Runs a recursive in-container `fs.watch` debounced broadcast on `/workspace`. Whenever commands like `mkdir`, `touch`, `rm`, or `git checkout` run in the terminal, the sidebar file tree auto-refreshes in real time without manual browser reload.
-- **Isolated Workspace Volume**: Mounts a host directory (`./test-workspace`) to `/workspace` inside the container, granting users safe, sandboxed file execution without exposing their root filesystem.
+### 1. Headless Containerized Backend (`compile-backend`)
 
-### 2. Multi-Stage Production Web Frontend (`compile-frontend`)
-- **Stage 1 (Builder)**: Compiles the React + Monaco Editor application using Vite, bundling web workers (`editor.worker`, `ts.worker`, `html.worker`) and vendor chunks.
-- **Stage 2 (Runner)**: Serves static assets through a lightweight Alpine Nginx container. Nginx acts as a reverse proxy, forwarding `/api/*` REST traffic directly to the backend container over Docker's internal network bridge (`http://backend:3000`).
+The backend container replaces the Electron Main Process:
+- **Base Environment**: Built on `node:20-bookworm-slim` with build essentials (`make`, `g++`, `python3`) required to compile native addons like `node-pty`.
+- **Language Server Toolchains**: Packages `clangd` (C/C++), `golang` and `gopls` (Go), `default-jdk` and `Eclipse JDTLS` (Java), and `pyright` (Python).
+- **Interactive Pseudo-Terminal**: Spawns real `bash` PTY instances (`node-pty`) and streams bidirectional input/output over WebSockets to `xterm.js` in the browser.
+- **Filesystem Watcher**: Runs a recursive in-container watcher (`fs.watch`) on `/workspace`. When files or directories are created, modified, or removed via terminal commands (`mkdir`, `touch`, `rm`, `git checkout`), debounced change events are pushed over WebSockets so the frontend Explorer updates immediately without manual browser refreshes.
+- **Sandboxed Workspace**: Mounts the host directory (`./test-workspace`) to `/workspace` in the container, providing an isolated development environment without exposing the host system.
 
-### 3. Virtual IPC Bridge (Polyfilling `window.api`)
-Rather than refactoring thousands of lines of UI code across the application, the web frontend implements an elegant **WebSocket & REST Virtual IPC Bridge** in [`main.jsx`](client/src/renderer/src/main.jsx):
-- Polyfills `window.api` with asynchronous remote procedure calls (`wsInvoke`) that mirror the Electron desktop API signatures.
-- Automatically routes file CRUD operations, shell sessions, language server protocol (LSP) payloads, and AI generation calls across the network.
-- Implements web-native file pickers (`input[type="file"]`, `webkitdirectory`) and global **Drag-and-Drop** listeners: dropping files or folders from Windows/macOS into the browser instantly uploads them into the container's `/workspace` and opens them in Monaco.
+### 2. Static Frontend & Reverse Proxy (`compile-frontend`)
+
+The frontend container is configured with a two-stage build:
+- **Builder Stage**: Uses Node 20 Alpine to compile the React and Monaco Editor application with Vite, resolving web workers and dependencies into optimized bundles.
+- **Runner Stage**: Uses Alpine Nginx to serve the compiled static assets. Nginx also serves as a reverse proxy, forwarding requests from `/api/*` to the backend container (`http://backend:3000/api/`) over Docker's internal network.
+
+### 3. Virtual IPC Bridge (`window.api` Polyfill)
+
+To maintain compatibility with existing Electron-oriented React components, [`main.jsx`](client/src/renderer/src/main.jsx) implements a lightweight bridge:
+- Re-exposes the `window.api` interface expected by the UI.
+- Directs file operations (`getFileContents`, `saveFileContents`, `deleteItem`, `renameItem`) and terminal actions (`createTerminal`, `killTerminal`, `sendTerminalData`) across a WebSocket connection using JSON-RPC patterns (`wsInvoke`).
+- Implements web-compatible file and directory importers (`input[type="file"]`, `webkitdirectory`) and global drag-and-drop event listeners that transfer files directly into the container's `/workspace`.
+- Blocks browser default actions on keyboard events (<kbd>Ctrl</kbd> + <kbd>O</kbd>, <kbd>Ctrl</kbd> + <kbd>S</kbd>, <kbd>Ctrl</kbd> + <kbd>P</kbd>) so shortcut chords function as expected inside the IDE.
 
 ---
 
-## ⚡ Key Features
+## Core Features
 
-- **Monaco Code Editor**: Full VS Code-style editing experience with syntax highlighting, multi-cursor, bracket matching, diff viewers, and minimap.
-- **AI Ghost Text (Inline Autocomplete)**: Non-intrusive AI ghost text suggestions generated via Google Gemini 2.5 Flash as you type, accepted with <kbd>Tab</kbd> and dismissable with <kbd>Esc</kbd>.
-- **Contextual AI Chat Sidebar**: Right-docked AI assistant that automatically incorporates active file contents and cursor-highlighted code snippets into prompt contexts for instant explanations, refactoring, and code generation.
-- **Real Interactive Bash Terminal**: Full `xterm.js` terminal connected to a live `bash` process inside the Linux container, supporting standard UNIX utilities, Git, package managers, and script execution.
-- **Live File Synchronizer**: In-container filesystem watcher automatically keeps the file tree in sync with terminal commands.
-- **Dual AI Key Support**: Seamless fallback to server-configured `.env` API keys, with optional client-side local storage overrides for personal keys.
-- **Browser Conflict Guards**: Built-in keyboard interceptors block standard browser actions (<kbd>Ctrl</kbd> + <kbd>O</kbd>, <kbd>Ctrl</kbd> + <kbd>S</kbd>, <kbd>Ctrl</kbd> + <kbd>P</kbd>) from breaking IDE navigation.
+- **Monaco Code Editor**: Code editing with syntax highlighting, line numbers, multi-cursor, bracket matching, and word wrap.
+- **AI Ghost Text (Inline Completions)**: Native `inlineCompletionsProvider` integrating with Google Gemini to display debounced suggestions inline, accepted with <kbd>Tab</kbd>.
+- **Contextual AI Chat Sidebar**: Right-hand chat panel with full active file context and cursor-highlighted text tracking for code explanation and refactoring.
+- **Interactive Terminal**: Full ANSI color terminal running `bash` via `node-pty` and `xterm.js`.
+- **Live Workspace Sync**: Automatic explorer updates on terminal file operations via backend recursive filesystem monitoring.
+- **Flexible Key Configuration**: Works out-of-the-box using the server `.env` Gemini API key, with client-side override options in settings.
 
 ---
 
-## 🚀 Quick Start Guide
+## Getting Started
 
 ### Prerequisites
-- [Docker](https://docs.docker.com/get-docker/) (v20.10+)
-- [Docker Compose](https://docs.docker.com/compose/) (v2.0+)
-- Google Gemini API Key ([Google AI Studio](https://aistudio.google.com/))
 
-### Installation & Launch
+- Docker (v20.10 or higher)
+- Docker Compose (v2.0 or higher)
+- A Google Gemini API Key
 
-1. **Clone the repository**:
+### Setup Instructions
+
+1. Clone the repository:
    ```bash
    git clone https://github.com/iamkartik0704/compile-web.git
    cd compile-web
    ```
 
-2. **Configure your Environment**:
-   Create a `.env` file in the root directory (or copy from `.env.example`):
+2. Create an environment file:
    ```bash
    cp .env.example .env
    ```
-   Add your Gemini API key:
+   Add your Gemini API key to `.env`:
    ```env
    GEMINI_API_KEY=your_gemini_api_key_here
    ```
 
-3. **Build and Launch via Docker Compose**:
+3. Build and run the containers:
    ```bash
    docker compose up --build -d
    ```
 
-4. **Access the IDE**:
-   Open your browser and navigate to:
-   ```
-   http://localhost:8000
-   ```
+4. Open the application:
+   Navigate to `http://localhost:8000` in your web browser.
 
 ---
 
-## 📁 Repository Structure
+## Project Structure
 
 ```
 compile-web/
-├── client/                     # Frontend SPA (React + Vite + Monaco)
-│   ├── src/
-│   │   ├── renderer/src/
-│   │   │   ├── components/     # UI Components (Sidebar, CodeEditor, Terminal, AI Chat)
-│   │   │   ├── store/          # Zustand State Stores (Shortcuts, Settings, UI)
-│   │   │   ├── main.jsx        # Virtual IPC Bridge (Polyfill over WebSockets)
-│   │   │   └── App.jsx         # Global Layout, Keybinding Router, Status Bar
-│   │   └── index.html
-│   ├── nginx.conf              # Nginx reverse proxy configuration
-│   └── Dockerfile              # Multi-stage Vite builder & Alpine runner
-│
-├── server/                     # Backend Headless Execution Service
-│   ├── index.js                # Express REST, WebSocket RPC server & PTY manager
-│   ├── package.json
-│   └── Dockerfile              # Debian container with node-pty, clangd, gopls, jdtls
-│
-├── test-workspace/             # Host directory mounted to /workspace in container
-├── docker-compose.yml          # Container orchestration service definitions
-├── .env.example                # Example environment variables template
-└── README.md                   # Project documentation
+|-- client/                     # Frontend React + Monaco web application
+|   |-- src/
+|   |   |-- renderer/src/
+|   |   |   |-- components/     # UI Components (Sidebar, CodeEditor, Terminal, AI Chat)
+|   |   |   |-- store/          # Zustand State Stores (Shortcuts, Settings)
+|   |   |   |-- main.jsx        # Virtual IPC Bridge (window.api polyfill)
+|   |   |   `-- App.jsx         # Layout, keyboard router, status bar
+|   |   `-- index.html
+|   |-- nginx.conf              # Reverse proxy configuration
+|   `-- Dockerfile              # Multi-stage Vite builder and Nginx runner
+|
+|-- server/                     # Backend execution service
+|   |-- index.js                # Express API, WebSocket RPC gateway, and PTY manager
+|   |-- package.json
+|   `-- Dockerfile              # Linux container with node-pty, clangd, gopls, jdtls
+|
+|-- test-workspace/             # Host directory mounted to /workspace
+|-- docker-compose.yml          # Container configuration
+|-- .env.example                # Environment variable template
+`-- README.md                   # Documentation
 ```
 
 ---
 
-## 🛠️ Technology Stack
+## Technology Stack
 
-| Layer | Technologies |
-| :--- | :--- |
-| **Frontend UI** | React 18, Monaco Editor (`@monaco-editor/react`), `xterm.js`, Zustand, Lucide Icons, React Markdown |
-| **Frontend Server** | Nginx Alpine (Reverse Proxy, Static Asset Serving, Cache Busting) |
-| **Backend Core** | Node.js (v20), Express, `ws` (WebSockets), `node-pty` (POSIX PTY) |
-| **Language Toolchains** | `clangd` (C/C++), `gopls` (Go), `jdtls` (Java), `pyright` (Python), `typescript-language-server` |
-| **AI Integration** | Google Gemini API (`gemini-2.5-flash`, `gemini-2.0-flash` fallback cascade) |
-| **DevOps & Containers** | Docker, Docker Compose, Multi-stage Builds |
+- **Frontend**: React 18, Monaco Editor (`@monaco-editor/react`), `xterm.js`, Zustand, Lucide Icons, React Markdown
+- **Web Server**: Nginx (Alpine Linux)
+- **Backend**: Node.js (v20), Express, `ws` (WebSockets), `node-pty`
+- **Language Servers**: `clangd` (C/C++), `gopls` (Go), `jdtls` (Java), `pyright` (Python)
+- **AI Integration**: Google Gemini API (`gemini-2.5-flash`)
+- **Containerization**: Docker, Docker Compose
 
 ---
 
-## 🔒 Security & Sandboxing
+## License
 
-- **Workplace Isolation**: User execution is confined strictly to the `/workspace` volume mount inside Docker. Host directories outside the project root cannot be accessed by code execution or terminal commands.
-- **Credential Storage**: API keys can either be managed securely on the server via `.env` or stored locally in browser `localStorage` without persisting to database instances.
-- **Process Isolation**: Terminal tabs execute within a restricted container Linux user environment.
-
----
-
-## 📄 License
-
-This project is open-source under the [MIT License](LICENSE).
+This repository does not currently include an explicit root license file. The package metadata in `client/package.json` references the MIT license. Please check with the repository owner for formal licensing terms before commercial use or redistribution.
