@@ -80,8 +80,78 @@ if (typeof window !== 'undefined' && !window.api) {
     deleteItemPermanent: (itemPath) => wsInvoke('deleteItemPermanent', itemPath),
     renameItem: (oldPath, newPath) => wsInvoke('renameItem', { oldPath, newPath }),
     copyItem: (src, dest) => wsInvoke('copyItem', { src, dest }),
-    selectFolder: () => Promise.resolve('/workspace'),
-    selectFile: () => Promise.resolve(null),
+    selectFolder: () => {
+      return new Promise((resolve) => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.webkitdirectory = true;
+        input.directory = true;
+        input.multiple = true;
+        input.style.display = 'none';
+        input.onchange = async () => {
+          const files = Array.from(input.files || []);
+          if (files.length === 0) {
+            resolve(null);
+            return;
+          }
+          for (const file of files) {
+            try {
+              const relPath = file.webkitRelativePath || file.name;
+              const targetPath = `/workspace/${relPath}`;
+              const parentDir = targetPath.substring(0, targetPath.lastIndexOf('/'));
+              if (parentDir && parentDir !== '/workspace') {
+                await wsInvoke('createFolder', parentDir);
+              }
+              const text = await file.text();
+              await wsInvoke('saveFileContents', { path: targetPath, content: text });
+            } catch (err) {
+              console.error('[Web IDE] Error importing folder file:', err);
+            }
+          }
+          window.dispatchEvent(new CustomEvent('refresh-sidebar'));
+          if (document.body.contains(input)) document.body.removeChild(input);
+          resolve('/workspace');
+        };
+        input.oncancel = () => {
+          if (document.body.contains(input)) document.body.removeChild(input);
+          resolve(null);
+        };
+        document.body.appendChild(input);
+        input.click();
+      });
+    },
+    selectFile: () => {
+      return new Promise((resolve) => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.style.display = 'none';
+        input.onchange = async () => {
+          const file = input.files && input.files[0];
+          if (!file) {
+            resolve(null);
+            return;
+          }
+          try {
+            const text = await file.text();
+            const targetPath = `/workspace/${file.name}`;
+            await wsInvoke('saveFileContents', { path: targetPath, content: text });
+            window.dispatchEvent(new CustomEvent('refresh-sidebar'));
+            resolve(targetPath);
+          } catch (err) {
+            console.error('[Web IDE] Error uploading file to workspace:', err);
+            resolve(null);
+          } finally {
+            if (document.body.contains(input)) document.body.removeChild(input);
+          }
+        };
+        input.oncancel = () => {
+          if (document.body.contains(input)) document.body.removeChild(input);
+          resolve(null);
+        };
+        document.body.appendChild(input);
+        input.click();
+      });
+    },
 
     // ── Live File Watcher ──
     watchProject: (path) => wsInvoke('watchProject', path),

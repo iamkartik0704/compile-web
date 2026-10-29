@@ -2611,6 +2611,7 @@ export const CodeEditor = ({
         <div className="editor-empty-actions">
           {renderEmptyAction('file.new', 'Ctrl+N', 'New File')}
           {renderEmptyAction('file.open', 'Ctrl+O', 'Open File')}
+          {renderEmptyAction('file.openFolder', 'Ctrl+K Ctrl+O', 'Open Folder')}
           {renderEmptyAction('ai.chat', 'Ctrl+L', 'Open AI Chat')}
           {renderEmptyAction('general.settings', 'Ctrl+,', 'Open Settings')}
         </div>

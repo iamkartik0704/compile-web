@@ -1146,7 +1146,17 @@ fetchKeys.then((result) => {
         window.close()
         return true
       case 'file.openFolder':
-        setActivePanel('explorer')
+        if (window.api && window.api.selectFolder) {
+          window.api.selectFolder().then(p => {
+            if (p) {
+              setProjectRoot(p)
+              setActivePanel('explorer')
+              window.dispatchEvent(new CustomEvent('refresh-sidebar'))
+            }
+          })
+        } else {
+          setActivePanel('explorer')
+        }
         return true
       case 'general.shortcuts':
         handleOpenFile('settings:shortcuts', 'Keyboard Shortcuts')
@@ -1347,6 +1357,19 @@ fetchKeys.then((result) => {
         return;
       }
 
+      // Intercept and prevent Chrome browser default actions that hijack the web IDE (Ctrl+O, Ctrl+S, Ctrl+P)
+      if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+        const lowerKey = e.key.toLowerCase();
+        if (['o', 's', 'p'].includes(lowerKey)) {
+          e.preventDefault();
+        }
+      }
+
+      // If a shortcut chord is active (e.g. Ctrl+K was pressed), prevent browser handling of subsequent keys
+      if (pendingChordRef.current.length > 0) {
+        e.preventDefault();
+      }
+
       const currentKeys = normalizeEventToKeys(e);
 
       const keysToMatch = [...pendingChordRef.current, ...currentKeys];
@@ -1472,7 +1495,40 @@ fetchKeys.then((result) => {
       }
     }
 
+    const handleDragOver = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.dataTransfer) {
+        e.dataTransfer.dropEffect = 'copy';
+      }
+    };
+
+    const handleDrop = async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!e.dataTransfer || !e.dataTransfer.files || e.dataTransfer.files.length === 0) return;
+
+      const files = Array.from(e.dataTransfer.files);
+      let lastOpened = null;
+      for (const file of files) {
+        try {
+          const text = await file.text();
+          const targetPath = `/workspace/${file.name}`;
+          await window.api.saveFileContents(targetPath, text);
+          lastOpened = { path: targetPath, name: file.name };
+        } catch (err) {
+          console.error('[Web IDE] Drag-drop file import error:', err);
+        }
+      }
+      window.dispatchEvent(new CustomEvent('refresh-sidebar'));
+      if (lastOpened) {
+        handleOpenFile(lastOpened.path, lastOpened.name);
+      }
+    };
+
     window.addEventListener('keydown', handleGlobalKeyDown, { capture: true })
+    window.addEventListener('dragover', handleDragOver)
+    window.addEventListener('drop', handleDrop)
 
     const handleExecuteGlobalAction = (e) => {
       executeGlobalActionRef.current(e.detail)
@@ -1482,6 +1538,8 @@ fetchKeys.then((result) => {
     return () => {
       window.removeEventListener('keydown', handleGlobalKeyDown, { capture: true })
       window.removeEventListener('execute-global-action', handleExecuteGlobalAction)
+      window.removeEventListener('dragover', handleDragOver)
+      window.removeEventListener('drop', handleDrop)
     }
   }, [])
 
@@ -2216,6 +2274,8 @@ CRITICAL RULE: If the file is empty, or you are creating a new file from scratch
                     }
                   },
                   { label: 'New File...', shortcut: 'Ctrl+Alt+N', action: () => window.dispatchEvent(new CustomEvent('create-new-file')) },
+                  { label: 'Open File...', shortcutId: 'file.open', shortcut: 'Ctrl+O', action: () => executeGlobalActionRef.current('file.open') },
+                  { label: 'Open Folder...', shortcutId: 'file.openFolder', shortcut: 'Ctrl+K Ctrl+O', action: () => executeGlobalActionRef.current('file.openFolder') },
                   { label: 'New Window', shortcutId: 'file.newWindow', shortcut: 'Ctrl+Shift+N', action: () => window.open(window.location.origin, '_blank') },
                   { type: 'separator' },
                   { label: 'Save', shortcutId: 'file.save', shortcut: 'Ctrl+S', action: () => saveActiveFile() },
