@@ -29,6 +29,7 @@ RUN mkdir -p /opt/jdtls && \
     mv /opt/jdtls/plugins/org.eclipse.equinox.launcher_*.jar /opt/jdtls/plugins/org.eclipse.equinox.launcher.jar
 RUN npm install
 RUN npm rebuild node-pty
+RUN npm install typescript typescript-language-server pyright vscode-jsonrpc
 #copying the server code
 COPY . .
 EXPOSE 3000

@@ -5,7 +5,7 @@ services:
     image: compile-web-frontend
     container_name: compile-frontend
     ports:
-      - "127.0.0.1:8000:80"
+      - "8000:80"
     depends_on:
       - backend
 
@@ -22,4 +22,4 @@ services:
       - ./server/index.js:/app/index.js
     environment:
       - GEMINI_API_KEY=${GEMINI_API_KEY}
-    command: sh -c "npm install typescript typescript-language-server pyright vscode-jsonrpc && node index.js"
+    command: ["node", "index.js"]
